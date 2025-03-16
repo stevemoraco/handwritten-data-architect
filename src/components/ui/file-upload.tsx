@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Progress } from '@/components/ui/progress';
@@ -66,7 +65,7 @@ export function FileUpload({
       <div
         {...getRootProps()}
         className={cn(
-          'border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors',
+          'border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors',
           {
             'border-primary/50 bg-primary/5': isDragActive && !isDragReject,
             'border-destructive/50 bg-destructive/5': isDragReject,
@@ -77,8 +76,7 @@ export function FileUpload({
         )}
       >
         <input {...getInputProps()} />
-        <div className="flex flex-col items-center justify-center space-y-3">
-          <UploadIcon className="h-12 w-12 text-muted-foreground/50" />
+        <div className="flex flex-col items-center justify-center space-y-2">
           <div className="space-y-1">
             <p className="text-sm font-medium">
               {isDragActive ? "Drop the files here" : "Drag & drop files here"}

@@ -15,6 +15,7 @@ import Contact from "./pages/Contact";
 import { UploadProvider } from "./context/UploadContext";
 import { DocumentProvider } from "./context/DocumentContext";
 import { AuthProvider } from "./context/AuthContext";
+import { AppLayout } from "./components/layout/AppLayout";
 
 const queryClient = new QueryClient();
 
