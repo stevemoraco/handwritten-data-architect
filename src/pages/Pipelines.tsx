@@ -38,18 +38,26 @@ export default function Pipelines() {
       }
 
       // Transform the data to match the DocumentPipeline type
-      const transformedData = data ? data.map(item => ({
-        id: item.id,
-        name: item.name,
-        description: item.description || '',
-        documentCount: item.document_count || 0,
-        status: item.status || 'active',
-        progressCount: item.progress_count || 0,
-        schemaId: item.schema_id || '',
-        createdAt: item.created_at,
-        updatedAt: item.updated_at,
-        organizationId: item.organization_id || '',
-      })) : [];
+      const transformedData = data ? data.map(item => {
+        // Ensure status is one of the allowed values, default to 'active' if not
+        const validStatus: "active" | "processing" | "completed" = 
+          (item.status === 'active' || item.status === 'processing' || item.status === 'completed') 
+            ? item.status as "active" | "processing" | "completed"
+            : 'active';
+            
+        return {
+          id: item.id,
+          name: item.name,
+          description: item.description || '',
+          documentCount: item.document_count || 0,
+          status: validStatus,
+          progressCount: item.progress_count || 0,
+          schemaId: item.schema_id || '',
+          createdAt: item.created_at,
+          updatedAt: item.updated_at,
+          organizationId: item.organization_id || '',
+        };
+      }) : [];
 
       setPipelines(transformedData);
     } catch (error) {
