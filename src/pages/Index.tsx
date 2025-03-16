@@ -1,15 +1,24 @@
+
 import * as React from "react";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
-import { Upload, ClipboardCheck, ArrowRight, FileText } from "lucide-react";
+import { Upload, ClipboardCheck, ArrowRight, FileText, Shield, Users } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { LoginModal } from "@/components/auth/LoginModal";
 import { Card, CardContent } from "@/components/ui/card";
+import { ProgressSteps } from "@/components/ui/progress-steps";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Progress } from "@/components/ui/progress";
+import { FileUpload } from "@/components/ui/file-upload";
+import { useUpload } from "@/context/UploadContext";
 
 export default function Index() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [showLoginModal, setShowLoginModal] = React.useState(false);
+  const [activeStep, setActiveStep] = React.useState<"upload" | "account" | "invite">("upload");
+  const [selectedFiles, setSelectedFiles] = React.useState<File[]>([]);
+  const { uploads } = useUpload();
   
   React.useEffect(() => {
     if (user) {
@@ -27,8 +36,26 @@ export default function Index() {
   
   const handleLoginComplete = () => {
     setShowLoginModal(false);
+    setActiveStep("invite");
+  };
+
+  const handleFilesSelected = (files: File[]) => {
+    setSelectedFiles(files);
+    if (!user) {
+      setActiveStep("account");
+      setShowLoginModal(true);
+    } else {
+      setActiveStep("invite");
+    }
+  };
+
+  const handleInviteTeam = () => {
     navigate("/process");
   };
+
+  const totalUploads = uploads.length;
+  const completedUploads = uploads.filter(upload => upload.status === "complete").length;
+  const uploadProgress = totalUploads > 0 ? Math.round((completedUploads / totalUploads) * 100) : 0;
   
   return (
     <div className="min-h-screen flex flex-col">
@@ -60,64 +87,114 @@ export default function Index() {
           <p className="text-xl text-muted-foreground">
             Transform handwritten medical and legal documents into structured digital data with our AI-powered solution.
           </p>
-          
-          <div className="flex flex-wrap justify-center gap-4 pt-4">
-            <Button 
-              onClick={handleStartProcessing}
-              size="lg" 
-              className="px-8 font-medium"
-            >
-              Upload Documents
-            </Button>
-            <Button 
-              variant="outline" 
-              size="lg"
-              onClick={() => setShowLoginModal(true)}
-              className="px-8 font-medium"
-            >
-              Create Account
-            </Button>
-            <Button 
-              variant="ghost" 
-              size="lg"
-              className="px-8 font-medium"
-            >
-              Invite Team
-            </Button>
-          </div>
         </div>
       </section>
       
       <section className="bg-muted/30 py-16">
         <div className="container max-w-5xl">
-          <div className="text-center mb-10">
-            <h2 className="text-2xl font-bold mb-2">Upload Example Documents</h2>
-            <p className="text-muted-foreground">
-              Start by uploading 2-3 sample PDFs to help us generate a document schema.
-            </p>
+          <div className="text-center mb-6">
+            <ProgressSteps 
+              steps={[
+                { id: "upload", label: "Upload Documents", icon: <Upload className="h-4 w-4" /> },
+                { id: "account", label: "Create Account", icon: <Shield className="h-4 w-4" /> },
+                { id: "invite", label: "Invite Team", icon: <Users className="h-4 w-4" /> }
+              ]} 
+              currentStep={activeStep}
+              className="mb-8"
+            />
           </div>
           
           <Card className="border-dashed bg-background">
-            <CardContent className="pt-10 flex flex-col items-center justify-center space-y-8 pb-10">
-              <div className="rounded-full bg-primary/10 p-5">
-                <Upload className="h-10 w-10 text-primary" />
-              </div>
+            <CardContent className="pt-10 pb-10">
+              {activeStep === "upload" && (
+                <div className="flex flex-col items-center justify-center space-y-8">
+                  <div className="rounded-full bg-primary/10 p-5">
+                    <Upload className="h-10 w-10 text-primary" />
+                  </div>
+                  
+                  <div className="text-center space-y-2">
+                    <h3 className="text-lg font-medium">Upload your documents</h3>
+                    <p className="text-muted-foreground text-sm">
+                      Drag & drop your PDF files here or click to select files
+                    </p>
+                  </div>
+                  
+                  <FileUpload
+                    onFilesUploaded={handleFilesSelected}
+                    accept={{ 'application/pdf': ['.pdf'] }}
+                    className="max-w-md mx-auto"
+                  />
+                </div>
+              )}
               
-              <div className="text-center space-y-2">
-                <h3 className="text-lg font-medium">Upload your documents</h3>
-                <p className="text-muted-foreground text-sm">
-                  Drag & drop your PDF files here or click to browse
-                </p>
-              </div>
+              {activeStep === "account" && (
+                <div className="flex flex-col items-center justify-center space-y-6">
+                  <div className="rounded-full bg-primary/10 p-5">
+                    <Shield className="h-10 w-10 text-primary" />
+                  </div>
+                  
+                  <div className="text-center space-y-2">
+                    <h3 className="text-lg font-medium">Create Your Account</h3>
+                    <p className="text-muted-foreground text-sm">
+                      Secure your documents by creating an account
+                    </p>
+                  </div>
+                  
+                  {uploads.length > 0 && (
+                    <div className="w-full max-w-md">
+                      <div className="flex justify-between text-sm mb-1">
+                        <span>Uploading {completedUploads} of {totalUploads} files</span>
+                        <span>{uploadProgress}%</span>
+                      </div>
+                      <Progress value={uploadProgress} className="h-2 mb-4" />
+                    </div>
+                  )}
+                  
+                  <Button onClick={() => setShowLoginModal(true)} className="mt-4">
+                    Create Account or Sign In
+                  </Button>
+                </div>
+              )}
               
-              <Button className="mt-2">
-                Select files
-              </Button>
-              
-              <Button variant="outline" className="mt-4 gap-2" onClick={handleStartProcessing}>
-                Next Step
-                <ArrowRight className="h-4 w-4" />
-              </Button>
+              {activeStep === "invite" && (
+                <div className="flex flex-col items-center justify-center space-y-6">
+                  <div className="rounded-full bg-primary/10 p-5">
+                    <Users className="h-10 w-10 text-primary" />
+                  </div>
+                  
+                  <div className="text-center space-y-2">
+                    <h3 className="text-lg font-medium">Invite Your Team</h3>
+                    <p className="text-muted-foreground text-sm">
+                      Collaborate with your team on document processing
+                    </p>
+                  </div>
+                  
+                  {uploads.length > 0 && (
+                    <div className="w-full max-w-md">
+                      <div className="flex justify-between text-sm mb-1">
+                        <span>{completedUploads} of {totalUploads} files processed</span>
+                        <span>{uploadProgress}%</span>
+                      </div>
+                      <Progress value={uploadProgress} className="h-2 mb-4" />
+                    </div>
+                  )}
+                  
+                  <div className="space-y-4 w-full max-w-md">
+                    <div className="flex space-x-2">
+                      <input 
+                        type="email" 
+                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                        placeholder="team@example.com"
+                      />
+                      <Button variant="outline">Invite</Button>
+                    </div>
+                    
+                    <Button onClick={handleInviteTeam} className="w-full">
+                      Continue to Dashboard
+                    </Button>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
