@@ -9,6 +9,7 @@ import { ExternalLink, FileText, MessageSquare, Code, AlertTriangle } from "luci
 import { PromptDisplay } from "./PromptDisplay";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "@/components/ui/use-toast";
+import { supabase } from "@/integrations/supabase/client";
 
 interface DocumentDetailProps {
   document: Document;
@@ -18,19 +19,67 @@ interface DocumentDetailProps {
 
 export function DocumentDetail({ document, onProcess, logs = [] }: DocumentDetailProps) {
   const [activeTab, setActiveTab] = React.useState("preview");
+  const [isCheckingFile, setIsCheckingFile] = React.useState(false);
 
-  const handleViewOriginal = (url: string) => {
+  const checkFileExists = async (path: string): Promise<boolean> => {
     try {
+      // Extract the userId and documentId from the path
+      const pathParts = path.split('/');
+      const userId = pathParts[pathParts.length - 3]; // Second-to-last segment
+      const documentId = pathParts[pathParts.length - 2]; // Last segment
+      
+      if (!userId || !documentId) {
+        console.error("Could not extract userId or documentId from path:", path);
+        return false;
+      }
+      
+      console.log("Checking if file exists:", `${userId}/${documentId}/original.pdf`);
+      
+      // Check if the file exists in storage
+      const { data, error } = await supabase.storage
+        .from("document_files")
+        .list(`${userId}/${documentId}`);
+      
+      if (error) {
+        console.error("Error checking file existence:", error);
+        return false;
+      }
+      
+      const fileExists = data?.some(file => file.name === 'original.pdf');
+      console.log("File exists check result:", fileExists, data);
+      return !!fileExists;
+    } catch (error) {
+      console.error("Error in checkFileExists:", error);
+      return false;
+    }
+  };
+
+  const handleViewOriginal = async (url: string) => {
+    try {
+      setIsCheckingFile(true);
+      
+      // Extract the base path from the URL (remove the filename)
+      const urlParts = url.split('/');
+      const userId = urlParts[urlParts.length - 3]; // Format is typically: .../userId/documentId/filename
+      const documentId = urlParts[urlParts.length - 2];
+      
+      if (!userId || !documentId) {
+        throw new Error("Could not determine file path from URL");
+      }
+      
       // For PDFs, always use the fixed filename 'original.pdf'
-      let finalUrl = url;
-      if (document.type === "pdf") {
-        // Get the base URL path without the filename
-        const urlParts = url.split('/');
-        if (urlParts.length > 0) {
-          urlParts.pop(); // Remove the filename
-          finalUrl = `${urlParts.join('/')}/original.pdf`;
-          console.log("Modified URL for PDF:", finalUrl);
-        }
+      const finalUrl = document.type === "pdf" 
+        ? `${supabase.storage.from("document_files").getPublicUrl(`${userId}/${documentId}/original.pdf`).data.publicUrl}`
+        : url;
+      
+      console.log("Original document URL:", finalUrl);
+      
+      // Check if the file exists before opening
+      const exists = await checkFileExists(finalUrl);
+      
+      if (!exists && document.type === "pdf") {
+        console.log("PDF file doesn't exist. Showing error toast.");
+        throw new Error("The original PDF file could not be found. It may have been deleted or moved.");
       }
       
       window.open(finalUrl, "_blank");
@@ -38,9 +87,11 @@ export function DocumentDetail({ document, onProcess, logs = [] }: DocumentDetai
       console.error("Error opening document:", error);
       toast({
         title: "Error",
-        description: "Could not open the original document. Please try again.",
+        description: error instanceof Error ? error.message : "Could not open the original document. Please try again.",
         variant: "destructive",
       });
+    } finally {
+      setIsCheckingFile(false);
     }
   };
 
@@ -56,9 +107,10 @@ export function DocumentDetail({ document, onProcess, logs = [] }: DocumentDetai
                   variant="outline"
                   size="sm"
                   onClick={() => handleViewOriginal(document.original_url!)}
+                  disabled={isCheckingFile}
                 >
                   <ExternalLink className="h-4 w-4 mr-2" />
-                  View Original
+                  {isCheckingFile ? "Checking..." : "View Original"}
                 </Button>
               )}
               {document.status !== "processed" && onProcess && (
