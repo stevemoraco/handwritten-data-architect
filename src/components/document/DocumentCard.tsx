@@ -5,7 +5,18 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Document } from "@/types";
-import { FileIcon, FilePenIcon, FileTextIcon, RotateCw, Trash2, FileImage, ExternalLink, Eye } from "lucide-react";
+import { 
+  FileIcon, 
+  FilePenIcon, 
+  FileTextIcon, 
+  RotateCw, 
+  Trash2, 
+  FileImage, 
+  ExternalLink, 
+  Eye, 
+  RefreshCw,
+  AlertCircle
+} from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { useDocuments } from "@/context/DocumentContext";
@@ -56,7 +67,7 @@ export function DocumentCard({
       case "processed":
         return <FileTextIcon className="h-3 w-3" />;
       case "failed":
-        return <FilePenIcon className="h-3 w-3" />;
+        return <AlertCircle className="h-3 w-3" />;
       default:
         return <FileIcon className="h-3 w-3" />;
     }
@@ -113,7 +124,7 @@ export function DocumentCard({
   };
 
   return (
-    <Card className={cn("overflow-hidden transition-all hover-lift", className)}>
+    <Card className={cn("overflow-hidden transition-all hover:shadow-md", className)}>
       <CardHeader className="p-4">
         <div className="flex items-start justify-between">
           <div className="space-y-1">
@@ -143,7 +154,7 @@ export function DocumentCard({
         </CardContent>
       )}
       
-      {document.thumbnails && document.thumbnails.length > 0 && (
+      {document.thumbnails && document.thumbnails.length > 0 ? (
         <CardContent className="p-0">
           <ScrollArea className="w-full">
             <div className="flex p-4 gap-3">
@@ -156,6 +167,10 @@ export function DocumentCard({
                     src={url}
                     alt={`Page ${index + 1}`}
                     className="h-full w-full object-cover transition-transform"
+                    onError={(e) => {
+                      // Fallback for broken images
+                      (e.target as HTMLImageElement).src = 'https://placehold.co/160x192/f5f5f5/333333?text=Page+'+(index+1);
+                    }}
                   />
                   <div className="absolute inset-0 bg-black/5 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
                     <Badge variant="secondary" className="text-[0.65rem]">
@@ -166,6 +181,11 @@ export function DocumentCard({
               ))}
             </div>
           </ScrollArea>
+        </CardContent>
+      ) : (
+        <CardContent className="p-4 text-center text-muted-foreground">
+          <FileIcon className="h-10 w-10 mx-auto mb-2 opacity-20" />
+          <p className="text-sm">No preview available</p>
         </CardContent>
       )}
       
@@ -191,33 +211,36 @@ export function DocumentCard({
           <Eye className="h-3 w-3 mr-1" /> View
         </Button>
         
-        {/* Conversion button - always show for PDFs, or show retry for failed */}
-        {(document.type === "pdf" || document.status === "failed") && (
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-8 text-xs"
-            onClick={handleConvert}
-            disabled={isConverting || document.status === "processing"}
-          >
-            {isConverting ? (
-              <>
-                <RotateCw className="h-3 w-3 mr-1 animate-spin" />
-                Converting...
-              </>
-            ) : document.thumbnails && document.thumbnails.length > 0 ? (
-              <>
-                <RotateCw className="h-3 w-3 mr-1" />
-                Retry
-              </>
-            ) : (
-              <>
-                <FileImage className="h-3 w-3 mr-1" />
-                Convert
-              </>
-            )}
-          </Button>
-        )}
+        {/* Retry/Convert button */}
+        <Button
+          size="sm"
+          variant={document.status === "failed" ? "destructive" : "outline"}
+          className="h-8 text-xs"
+          onClick={handleConvert}
+          disabled={isConverting || document.status === "processing"}
+        >
+          {isConverting ? (
+            <>
+              <RotateCw className="h-3 w-3 mr-1 animate-spin" />
+              Converting...
+            </>
+          ) : document.status === "failed" ? (
+            <>
+              <RefreshCw className="h-3 w-3 mr-1" />
+              Retry
+            </>
+          ) : document.thumbnails && document.thumbnails.length > 0 ? (
+            <>
+              <RotateCw className="h-3 w-3 mr-1" />
+              Reconvert
+            </>
+          ) : (
+            <>
+              <FileImage className="h-3 w-3 mr-1" />
+              Convert
+            </>
+          )}
+        </Button>
         
         {/* Text processing button */}
         <Button
@@ -259,15 +282,17 @@ export function DocumentCard({
         )}
         
         {/* View original document button */}
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-8 text-xs"
-          onClick={openOriginalDocument}
-        >
-          <ExternalLink className="h-3 w-3 mr-1" />
-          View PDF
-        </Button>
+        {document.url && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 text-xs"
+            onClick={openOriginalDocument}
+          >
+            <ExternalLink className="h-3 w-3 mr-1" />
+            View Original
+          </Button>
+        )}
         
         {/* Delete button */}
         <Button

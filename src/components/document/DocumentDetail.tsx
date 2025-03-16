@@ -5,7 +5,16 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Clock, Download, FileText, Images, List, RotateCw } from "lucide-react";
+import { 
+  Clock, 
+  Download, 
+  FileText, 
+  Images, 
+  List, 
+  RotateCw, 
+  AlertCircle,
+  ExternalLink 
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useDocuments } from "@/context/DocumentContext";
 import { toast } from "@/components/ui/use-toast";
@@ -13,22 +22,30 @@ import { getProcessingLogs } from "@/services/documentService";
 
 interface DocumentDetailProps {
   document: Document;
-  logs: ProcessingLog[];
+  logs?: ProcessingLog[];
 }
 
-export function DocumentDetail({ document, logs }: DocumentDetailProps) {
+export function DocumentDetail({ document, logs = [] }: DocumentDetailProps) {
   const { processDocumentText, convertPdfToImages } = useDocuments();
   const [isProcessing, setIsProcessing] = React.useState(false);
   const [processingLogs, setProcessingLogs] = React.useState<ProcessingLog[]>(logs || []);
   const [activeTab, setActiveTab] = React.useState("preview");
+  const [selectedImage, setSelectedImage] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    if (logs) {
+    if (logs && logs.length > 0) {
       setProcessingLogs(logs);
     } else {
       fetchLogs();
     }
   }, [document.id]);
+
+  React.useEffect(() => {
+    // Set first thumbnail as selected by default if available
+    if (document.thumbnails && document.thumbnails.length > 0 && !selectedImage) {
+      setSelectedImage(document.thumbnails[0]);
+    }
+  }, [document.thumbnails]);
 
   const fetchLogs = async () => {
     try {
@@ -45,8 +62,8 @@ export function DocumentDetail({ document, logs }: DocumentDetailProps) {
       try {
         await processDocumentText(document.id);
         toast({
-          title: "Transcription complete",
-          description: "Document has been transcribed successfully.",
+          title: "Transcription started",
+          description: "Document is being transcribed. This may take a moment.",
         });
         await fetchLogs();
       } catch (error) {
@@ -99,41 +116,43 @@ export function DocumentDetail({ document, logs }: DocumentDetailProps) {
         <CardTitle className="text-xl flex items-center justify-between">
           <span>Document Details</span>
           <div className="flex gap-2">
-            {document.type === "pdf" && (
-              <Button
-                variant="outline"
-                onClick={handleReprocess}
-                disabled={isProcessing}
-                className="gap-1"
-              >
-                <RotateCw className="h-4 w-4" />
-                Reprocess
-              </Button>
-            )}
+            <Button
+              variant="outline"
+              onClick={handleReprocess}
+              disabled={isProcessing}
+              className="gap-1"
+            >
+              <RotateCw className="h-4 w-4" />
+              {document.status === "failed" ? "Retry Processing" : "Reprocess"}
+            </Button>
+            
             {!document.transcription && (
               <Button
                 onClick={handleTranscribe}
-                disabled={isProcessing}
+                disabled={isProcessing || !document.thumbnails || document.thumbnails.length === 0}
                 className="gap-1"
               >
                 <FileText className="h-4 w-4" />
                 {isProcessing ? "Processing..." : "Generate Transcription"}
               </Button>
             )}
-            <Button
-              variant="outline"
-              onClick={handleDownloadOriginal}
-              className="gap-1"
-            >
-              <Download className="h-4 w-4" />
-              Download
-            </Button>
+            
+            {document.url && (
+              <Button
+                variant="outline"
+                onClick={handleDownloadOriginal}
+                className="gap-1"
+              >
+                <ExternalLink className="h-4 w-4" />
+                View Original
+              </Button>
+            )}
           </div>
         </CardTitle>
       </CardHeader>
       <CardContent>
         <div className="mb-4 flex flex-wrap gap-2">
-          <Badge variant="outline">{document.type.toUpperCase()}</Badge>
+          <Badge variant="outline">{document.type?.toUpperCase() || "DOCUMENT"}</Badge>
           <Badge 
             variant={
               document.status === "processed" ? "default" :
@@ -141,7 +160,7 @@ export function DocumentDetail({ document, logs }: DocumentDetailProps) {
               document.status === "failed" ? "destructive" : "outline"
             }
           >
-            {document.status.charAt(0).toUpperCase() + document.status.slice(1)}
+            {document.status ? document.status.charAt(0).toUpperCase() + document.status.slice(1) : "Unknown"}
           </Badge>
           {document.pageCount > 0 && (
             <Badge variant="outline">{document.pageCount} pages</Badge>
@@ -166,26 +185,59 @@ export function DocumentDetail({ document, logs }: DocumentDetailProps) {
           
           <TabsContent value="preview" className="mt-0">
             {document.thumbnails && document.thumbnails.length > 0 ? (
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-4">
-                {document.thumbnails.map((url, index) => (
-                  <div
-                    key={index}
-                    className="aspect-[3/4] relative overflow-hidden rounded-md border"
-                  >
+              <div className="grid grid-cols-1 gap-6">
+                {/* Main image viewer */}
+                <div className="aspect-auto max-h-[60vh] overflow-hidden rounded-md border bg-muted flex items-center justify-center">
+                  {selectedImage ? (
                     <img
-                      src={url}
-                      alt={`Page ${index + 1}`}
-                      className="h-full w-full object-cover"
+                      src={selectedImage}
+                      alt="Selected page"
+                      className="max-h-full max-w-full object-contain"
                       onError={(e) => {
                         // Fallback for broken images
-                        (e.target as HTMLImageElement).src = `https://placehold.co/800x1100/f5f5f5/333333?text=Page+${index + 1}`;
+                        (e.target as HTMLImageElement).src = 'https://placehold.co/800x1100/f5f5f5/333333?text=Image+Not+Available';
                       }}
                     />
-                    <div className="absolute top-2 right-2">
-                      <Badge>Page {index + 1}</Badge>
+                  ) : (
+                    <div className="p-12 text-center text-muted-foreground">
+                      <FileText className="h-12 w-12 mx-auto mb-2" />
+                      <p>Select a page to preview</p>
                     </div>
-                  </div>
-                ))}
+                  )}
+                </div>
+                
+                {/* Thumbnails */}
+                <div>
+                  <h3 className="text-sm font-medium mb-2">Pages</h3>
+                  <ScrollArea className="w-full whitespace-nowrap pb-2">
+                    <div className="flex gap-2">
+                      {document.thumbnails.map((url, index) => (
+                        <div
+                          key={index}
+                          className={`relative cursor-pointer hover:opacity-90 transition-all ${
+                            selectedImage === url ? 'ring-2 ring-primary' : ''
+                          }`}
+                          onClick={() => setSelectedImage(url)}
+                        >
+                          <div className="w-20 h-28 overflow-hidden rounded-md border">
+                            <img
+                              src={url}
+                              alt={`Page ${index + 1}`}
+                              className="h-full w-full object-cover"
+                              onError={(e) => {
+                                // Fallback for broken images
+                                (e.target as HTMLImageElement).src = `https://placehold.co/160x224/f5f5f5/333333?text=Page+${index + 1}`;
+                              }}
+                            />
+                          </div>
+                          <div className="absolute bottom-1 right-1">
+                            <Badge variant="secondary" className="text-[0.6rem]">{index + 1}</Badge>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </ScrollArea>
+                </div>
               </div>
             ) : (
               <div className="py-12 text-center bg-muted/20 rounded-md">
@@ -198,6 +250,12 @@ export function DocumentDetail({ document, logs }: DocumentDetailProps) {
                     "No preview images available. Please convert the document first."
                   )}
                 </p>
+                {document.status !== "processing" && (
+                  <Button onClick={handleReprocess} className="mt-4" variant="outline">
+                    <RotateCw className="h-4 w-4 mr-2" />
+                    {document.status === "failed" ? "Retry Processing" : "Process Document"}
+                  </Button>
+                )}
               </div>
             )}
           </TabsContent>
@@ -220,6 +278,12 @@ export function DocumentDetail({ document, logs }: DocumentDetailProps) {
                     "No transcription available. Please generate a transcription first."
                   )}
                 </p>
+                {!isProcessing && document.thumbnails && document.thumbnails.length > 0 && (
+                  <Button onClick={handleTranscribe} className="mt-4" variant="outline">
+                    <FileText className="h-4 w-4 mr-2" />
+                    Generate Transcription
+                  </Button>
+                )}
               </div>
             )}
           </TabsContent>
@@ -262,6 +326,10 @@ export function DocumentDetail({ document, logs }: DocumentDetailProps) {
                 ) : (
                   <div className="py-12 text-center">
                     <p className="text-muted-foreground">No logs available.</p>
+                    <Button onClick={fetchLogs} className="mt-4" variant="outline" size="sm">
+                      <RotateCw className="h-3 w-3 mr-2" />
+                      Refresh Logs
+                    </Button>
                   </div>
                 )}
               </ScrollArea>

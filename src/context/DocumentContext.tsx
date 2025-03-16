@@ -70,14 +70,28 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
 
       // Fetch thumbnails for each document
       for (const doc of documentsList) {
-        const { data: pages } = await supabase
-          .from("document_pages")
-          .select("image_url")
-          .eq("document_id", doc.id)
-          .order("page_number", { ascending: true });
+        try {
+          const { data: pages, error: pagesError } = await supabase
+            .from("document_pages")
+            .select("image_url, page_number")
+            .eq("document_id", doc.id)
+            .order("page_number", { ascending: true });
 
-        if (pages && pages.length > 0) {
-          doc.thumbnails = pages.map(page => page.image_url).filter(Boolean);
+          if (pagesError) {
+            console.error(`Error fetching thumbnails for doc ${doc.id}:`, pagesError);
+            continue;
+          }
+
+          if (pages && pages.length > 0) {
+            // Filter out any null or undefined URLs
+            doc.thumbnails = pages
+              .map(page => page.image_url)
+              .filter(url => !!url);
+              
+            console.log(`Loaded ${doc.thumbnails.length} thumbnails for document ${doc.id}`);
+          }
+        } catch (err) {
+          console.error(`Failed to load thumbnails for doc ${doc.id}:`, err);
         }
       }
 

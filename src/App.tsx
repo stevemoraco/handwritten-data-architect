@@ -26,6 +26,7 @@ const TermsPage = lazy(() => import("@/pages/Terms"));
 const NotFoundPage = lazy(() => import("@/pages/NotFound"));
 const DocumentProcessPage = lazy(() => import("@/pages/DocumentProcess"));
 const DocumentsPage = lazy(() => import("@/pages/Documents"));
+const DocumentPage = lazy(() => import("@/pages/Document"));
 const PipelinesPage = lazy(() => import("@/pages/Pipelines"));
 const SettingsPage = lazy(() => import("@/pages/Settings"));
 
@@ -62,6 +63,7 @@ function App() {
                     {/* Protected routes */}
                     <Route path="process" element={<DocumentProcessPage />} />
                     <Route path="documents" element={<DocumentsPage />} />
+                    <Route path="document/:documentId" element={<DocumentPage />} />
                     <Route path="pipelines" element={<PipelinesPage />} />
                     <Route path="settings" element={<SettingsPage />} />
                     

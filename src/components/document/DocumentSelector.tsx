@@ -48,15 +48,34 @@ export function DocumentSelector({
     }
   }, [preselectedIds]);
   
-  // Calculate document type counts
-  const statusCounts = React.useMemo(() => {
-    const counts = {
+  // Calculate document counts by type/status
+  const documentCounts = React.useMemo(() => {
+    const typeCount: Record<string, number> = {};
+    const statusCount: Record<string, number> = {
       all: documents.length,
-      ready: documents.filter(doc => doc.status === "processed" && doc.thumbnails && doc.thumbnails.length > 0).length,
-      processed: documents.filter(doc => doc.status === "processed").length,
-      failed: documents.filter(doc => doc.status === "failed").length,
+      ready: 0,
+      processed: 0,
+      processing: 0,
+      failed: 0,
     };
-    return counts;
+    
+    documents.forEach(doc => {
+      // Count by document type (pdf, image, etc)
+      const type = doc.type || "unknown";
+      typeCount[type] = (typeCount[type] || 0) + 1;
+      
+      // Count by status
+      if (doc.status) {
+        statusCount[doc.status] = (statusCount[doc.status] || 0) + 1;
+      }
+      
+      // Special "ready" category for processed docs with thumbnails
+      if (doc.status === "processed" && doc.thumbnails && doc.thumbnails.length > 0) {
+        statusCount.ready = (statusCount.ready || 0) + 1;
+      }
+    });
+    
+    return { typeCount, statusCount };
   }, [documents]);
 
   const toggleDocumentSelection = (documentId: string) => {
@@ -70,12 +89,7 @@ export function DocumentSelector({
         return newSelection;
       }
       
-      // If not selected and we have a maxSelections limit, check it
-      if (maxSelections && prev.length >= maxSelections) {
-        return prev; // Don't change selection if we've reached the limit
-      }
-      
-      // Add the selection
+      // Add the selection (no max limit now)
       const newSelection = [...prev, documentId];
       onSelectionChange(newSelection);
       return newSelection;
@@ -94,8 +108,6 @@ export function DocumentSelector({
       return doc.status === filterStatus;
     });
   }, [documents, filterStatus]);
-
-  const canSelectMore = !maxSelections || selectedDocumentIds.length < maxSelections;
 
   if (isLoading) {
     return (
@@ -126,25 +138,32 @@ export function DocumentSelector({
           <h3 className="text-sm font-medium flex items-center gap-2">
             <FileText className="h-4 w-4" />
             <span>Select Documents</span>
-            {maxSelections && (
-              <Badge variant="outline" className="ml-2">
-                {selectedDocumentIds.length}/{maxSelections} selected
-              </Badge>
-            )}
+            <Badge variant="outline" className="ml-2">
+              {selectedDocumentIds.length} selected
+            </Badge>
           </h3>
         )}
 
         <Select value={filterStatus} onValueChange={setFilterStatus}>
-          <SelectTrigger className="w-[180px]">
+          <SelectTrigger className="w-[200px]">
             <SelectValue placeholder="Filter documents" />
           </SelectTrigger>
           <SelectContent>
             <SelectGroup>
               <SelectLabel>Filter by status</SelectLabel>
-              <SelectItem value="all">All documents ({statusCounts.all})</SelectItem>
-              <SelectItem value="ready">Ready to process ({statusCounts.ready})</SelectItem>
-              <SelectItem value="processed">Processed ({statusCounts.processed})</SelectItem>
-              <SelectItem value="failed">Failed ({statusCounts.failed})</SelectItem>
+              <SelectItem value="all">All documents ({documentCounts.statusCount.all})</SelectItem>
+              <SelectItem value="ready">Ready to process ({documentCounts.statusCount.ready})</SelectItem>
+              <SelectItem value="processed">Processed ({documentCounts.statusCount.processed})</SelectItem>
+              <SelectItem value="processing">Processing ({documentCounts.statusCount.processing})</SelectItem>
+              <SelectItem value="failed">Failed ({documentCounts.statusCount.failed})</SelectItem>
+            </SelectGroup>
+            <SelectGroup>
+              <SelectLabel>Filter by type</SelectLabel>
+              {Object.entries(documentCounts.typeCount).map(([type, count]) => (
+                <SelectItem key={type} value={`type-${type}`}>
+                  {type.toUpperCase()} ({count})
+                </SelectItem>
+              ))}
             </SelectGroup>
           </SelectContent>
         </Select>
@@ -158,7 +177,7 @@ export function DocumentSelector({
               document={doc}
               isSelected={selectedDocumentIds.includes(doc.id)}
               onSelect={() => toggleDocumentSelection(doc.id)}
-              disabled={!selectedDocumentIds.includes(doc.id) && !canSelectMore}
+              disabled={false} // Removing disabled state to allow any number of selections
             />
           ))}
           
@@ -225,6 +244,10 @@ function DocumentCard({ document, isSelected, onSelect, disabled }: DocumentCard
               src={document.thumbnails[0]} 
               alt={document.name}
               className="h-full w-full object-cover"
+              onError={(e) => {
+                // Fallback for broken images
+                (e.target as HTMLImageElement).src = 'https://placehold.co/100x100/f5f5f5/333333?text=No+Preview';
+              }}
             />
           ) : (
             <FileText className="h-full w-full p-2 text-muted-foreground" />
