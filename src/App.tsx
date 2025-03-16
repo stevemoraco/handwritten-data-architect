@@ -12,6 +12,11 @@ import Privacy from "./pages/Privacy";
 import Features from "./pages/Features";
 import Pricing from "./pages/Pricing";
 import Contact from "./pages/Contact";
+import Security from "./pages/Security";
+import SOC2 from "./pages/SOC2";
+import Documentation from "./pages/Documentation";
+import API from "./pages/API";
+import HelpCenter from "./pages/HelpCenter";
 import { UploadProvider } from "./context/UploadContext";
 import { DocumentProvider } from "./context/DocumentContext";
 import { AuthProvider } from "./context/AuthContext";
@@ -36,6 +41,11 @@ const App = () => (
                 <Route path="/features" element={<Features />} />
                 <Route path="/pricing" element={<Pricing />} />
                 <Route path="/contact" element={<Contact />} />
+                <Route path="/security" element={<Security />} />
+                <Route path="/soc2" element={<SOC2 />} />
+                <Route path="/documentation" element={<Documentation />} />
+                <Route path="/api" element={<API />} />
+                <Route path="/help" element={<HelpCenter />} />
                 {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
                 <Route path="*" element={<NotFound />} />
               </Routes>
