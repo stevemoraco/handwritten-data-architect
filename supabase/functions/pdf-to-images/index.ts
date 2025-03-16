@@ -1,4 +1,3 @@
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.8.0";
 import * as pdfjs from "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/+esm";
@@ -77,9 +76,24 @@ serve(async (req) => {
     
     console.log("Downloading the PDF file...");
     
-    // Build path to the PDF file
-    const pdfPath = `${userId}/${documentId}/original.pdf`;
-    console.log(`PDF path: ${pdfPath}`);
+    // Get the file path from the document URL
+    // This is critical - we need to extract the path from the URL that works
+    let pdfUrl = document.original_url || document.url;
+    if (!pdfUrl) {
+      throw new Error("No document URL available");
+    }
+    
+    console.log(`Document URL: ${pdfUrl}`);
+    
+    // Extract the path from the URL
+    // Format is like: https://...supabase.co/storage/v1/object/public/document_files/userId/temp/docId/filename.pdf
+    let pathParts = pdfUrl.split('document_files/')[1];
+    if (!pathParts) {
+      throw new Error("Invalid document URL format");
+    }
+    
+    const pdfPath = pathParts;
+    console.log(`Extracted PDF path: ${pdfPath}`);
     
     // Download the PDF file
     const { data: fileData, error: downloadError } = await supabase.storage

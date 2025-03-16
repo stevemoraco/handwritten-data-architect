@@ -1,3 +1,4 @@
+
 import { v4 as uuidv4 } from "uuid";
 import { supabase } from "@/integrations/supabase/client";
 import { Document, DocumentData, ProcessingLog, UploadProgress } from "@/types";
@@ -90,10 +91,9 @@ export async function uploadDocument(
       });
     }
 
-    // Important fix: Always use a fixed filename for PDFs to prevent issues with spaces
-    const uploadPath = fileType === 'pdf' 
-      ? `${userId}/${id}/original.pdf` 
-      : `${userId}/${id}/${filename}`;
+    // IMPORTANT: Use a temporary folder structure for initial upload
+    // This is the path that actually works based on the successful URL pattern
+    const uploadPath = `${userId}/temp/${id.substring(0, 10)}/${filename}`;
     
     console.log(`Uploading file to path: ${uploadPath}`);
       
@@ -121,7 +121,7 @@ export async function uploadDocument(
       });
     }
 
-    // Use the same path we uploaded to for the public URL
+    // Get the public URL for the uploaded file
     const { data: publicUrlData } = supabase.storage
       .from("document_files")
       .getPublicUrl(uploadPath);
@@ -131,6 +131,7 @@ export async function uploadDocument(
       .from("documents")
       .update({
         original_url: publicUrlData.publicUrl,
+        url: publicUrlData.publicUrl, // Ensure both URL fields match
         status: "processing"
       })
       .eq("id", id);

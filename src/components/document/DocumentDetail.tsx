@@ -24,19 +24,15 @@ export function DocumentDetail({ document, onProcess, logs = [] }: DocumentDetai
     try {
       setIsCheckingFile(true);
       
-      // For PDFs, link directly to the original document URL
-      if (document.original_url) {
-        // Open the URL directly - no need for complex checks
-        window.open(document.original_url, "_blank");
-        console.log("Opening document URL:", document.original_url);
+      // Check URL availability and prioritize original_url
+      let documentUrl = document.original_url || document.url;
+      
+      if (documentUrl) {
+        // Log the URL to help debug
+        console.log("Opening document URL:", documentUrl);
+        window.open(documentUrl, "_blank");
       } else {
-        // If no original_url is available in the document object, try to construct one from url field
-        if (document.url) {
-          window.open(document.url, "_blank");
-          console.log("Opening document URL from url field:", document.url);
-        } else {
-          throw new Error("No original document URL available");
-        }
+        throw new Error("No document URL available");
       }
     } catch (error) {
       console.error("Error opening document:", error);
@@ -153,7 +149,7 @@ export function DocumentDetail({ document, onProcess, logs = [] }: DocumentDetai
               ) : (
                 <div className="text-center text-muted-foreground py-8 flex flex-col items-center">
                   <p className="mb-4">No preview thumbnails available</p>
-                  {document.original_url && (
+                  {(document.original_url || document.url) && (
                     <Button
                       variant="outline"
                       onClick={handleViewOriginal}
