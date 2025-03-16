@@ -1,60 +1,139 @@
 
-import { Toaster } from "@/components/ui/toaster";
-import { Toaster as Sonner } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { AppLayout } from "./components/layout/AppLayout";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
-import DocumentProcess from "./pages/DocumentProcess";
-import Terms from "./pages/Terms";
-import Privacy from "./pages/Privacy";
 import Features from "./pages/Features";
 import Pricing from "./pages/Pricing";
+import API from "./pages/API";
 import Contact from "./pages/Contact";
+import Documentation from "./pages/Documentation";
+import HelpCenter from "./pages/HelpCenter";
 import Security from "./pages/Security";
 import SOC2 from "./pages/SOC2";
-import Documentation from "./pages/Documentation";
-import API from "./pages/API";
-import HelpCenter from "./pages/HelpCenter";
-import { UploadProvider } from "./context/UploadContext";
-import { DocumentProvider } from "./context/DocumentContext";
+import Terms from "./pages/Terms";
+import Privacy from "./pages/Privacy";
+import DocumentProcess from "./pages/DocumentProcess";
+import AuthCallback from "./pages/AuthCallback";
+import { Toaster } from "./components/ui/toaster";
 import { AuthProvider } from "./context/AuthContext";
-import { AppLayout } from "./components/layout/AppLayout";
+import { UploadProvider } from "./context/UploadContext";
 
 const queryClient = new QueryClient();
 
-const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <AuthProvider>
-        <UploadProvider>
-          <DocumentProvider>
+function App() {
+  return (
+    <BrowserRouter>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <UploadProvider>
+            <Routes>
+              <Route path="/auth/callback" element={<AuthCallback />} />
+              <Route
+                path="/"
+                element={
+                  <AppLayout>
+                    <Index />
+                  </AppLayout>
+                }
+              />
+              <Route
+                path="/features"
+                element={
+                  <AppLayout>
+                    <Features />
+                  </AppLayout>
+                }
+              />
+              <Route
+                path="/pricing"
+                element={
+                  <AppLayout>
+                    <Pricing />
+                  </AppLayout>
+                }
+              />
+              <Route
+                path="/api"
+                element={
+                  <AppLayout>
+                    <API />
+                  </AppLayout>
+                }
+              />
+              <Route
+                path="/contact"
+                element={
+                  <AppLayout>
+                    <Contact />
+                  </AppLayout>
+                }
+              />
+              <Route
+                path="/documentation"
+                element={
+                  <AppLayout>
+                    <Documentation />
+                  </AppLayout>
+                }
+              />
+              <Route
+                path="/help"
+                element={
+                  <AppLayout>
+                    <HelpCenter />
+                  </AppLayout>
+                }
+              />
+              <Route
+                path="/security"
+                element={
+                  <AppLayout>
+                    <Security />
+                  </AppLayout>
+                }
+              />
+              <Route
+                path="/soc2"
+                element={
+                  <AppLayout>
+                    <SOC2 />
+                  </AppLayout>
+                }
+              />
+              <Route
+                path="/terms"
+                element={
+                  <AppLayout>
+                    <Terms />
+                  </AppLayout>
+                }
+              />
+              <Route
+                path="/privacy"
+                element={
+                  <AppLayout>
+                    <Privacy />
+                  </AppLayout>
+                }
+              />
+              <Route
+                path="/process"
+                element={
+                  <AppLayout>
+                    <DocumentProcess />
+                  </AppLayout>
+                }
+              />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
             <Toaster />
-            <Sonner />
-            <BrowserRouter>
-              <Routes>
-                <Route path="/" element={<Index />} />
-                <Route path="/process" element={<DocumentProcess />} />
-                <Route path="/terms" element={<Terms />} />
-                <Route path="/privacy" element={<Privacy />} />
-                <Route path="/features" element={<Features />} />
-                <Route path="/pricing" element={<Pricing />} />
-                <Route path="/contact" element={<Contact />} />
-                <Route path="/security" element={<Security />} />
-                <Route path="/soc2" element={<SOC2 />} />
-                <Route path="/documentation" element={<Documentation />} />
-                <Route path="/api" element={<API />} />
-                <Route path="/help" element={<HelpCenter />} />
-                {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-                <Route path="*" element={<NotFound />} />
-              </Routes>
-            </BrowserRouter>
-          </DocumentProvider>
-        </UploadProvider>
-      </AuthProvider>
-    </TooltipProvider>
-  </QueryClientProvider>
-);
+          </UploadProvider>
+        </AuthProvider>
+      </QueryClientProvider>
+    </BrowserRouter>
+  );
+}
 
 export default App;

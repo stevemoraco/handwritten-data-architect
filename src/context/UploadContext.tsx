@@ -68,7 +68,7 @@ export const UploadProvider = ({ children }: UploadProviderProps) => {
 
     // Only show toast for completion, not for errors
     const upload = uploads.find((u) => u.id === id);
-    if (upload && status === 'complete') {
+    if (upload && status === 'complete' && !message) {
       toast({
         title: 'Upload complete',
         description: `${upload.fileName} has been uploaded successfully.`,

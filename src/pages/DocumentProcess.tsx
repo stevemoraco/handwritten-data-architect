@@ -71,23 +71,39 @@ export default function DocumentProcess() {
     }
   });
   const [documentDetails, setDocumentDetails] = React.useState<any[]>([]);
+  const [authCheckComplete, setAuthCheckComplete] = React.useState(false);
 
   React.useEffect(() => {
+    let timer: NodeJS.Timeout;
+    
     const checkAuth = async () => {
-      if (!isLoading && !user) {
-        console.log("Auth check failed: User not authenticated");
-        toast({
-          title: "Authentication required",
-          description: "Please log in to access this page",
-          variant: "destructive"
-        });
-        navigate("/");
-      } else if (user) {
-        console.log("Auth check passed: User authenticated", user.email);
+      if (!isLoading) {
+        setAuthCheckComplete(true);
+        
+        if (!user) {
+          console.log("Auth check: User not authenticated");
+          toast({
+            title: "Authentication required",
+            description: "Please log in to access this page",
+            variant: "destructive"
+          });
+          navigate("/");
+        } else {
+          console.log("Auth check: User authenticated", user.email);
+        }
+      } else {
+        timer = setTimeout(() => {
+          setAuthCheckComplete(true);
+          console.log("Auth check timed out");
+        }, 5000);
       }
     };
 
     checkAuth();
+    
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
   }, [user, isLoading, navigate, toast]);
 
   const handleDocumentsUploaded = async (documentIds: string[]) => {
@@ -479,7 +495,7 @@ export default function DocumentProcess() {
     }
   };
 
-  if (isLoading) {
+  if (isLoading && !authCheckComplete) {
     return (
       <div className="container py-20 flex items-center justify-center">
         <div className="text-center">

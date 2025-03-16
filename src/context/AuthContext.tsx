@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { User } from '@/types';
 import { toast } from '@/components/ui/use-toast';
@@ -130,6 +131,25 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     
     return () => {
       authListener.subscription.unsubscribe();
+    };
+  }, []);
+
+  // Function to handle window message events for the popup
+  useEffect(() => {
+    const handleAuthMessage = (event: MessageEvent) => {
+      // Only accept messages from the same origin for security
+      if (event.origin !== window.location.origin) return;
+      
+      if (event.data?.type === 'SUPABASE_AUTH_COMPLETE') {
+        console.log('Auth popup closed, data received:', event.data);
+        // No need to manually set user as the onAuthStateChange listener will catch the SIGNED_IN event
+      }
+    };
+
+    window.addEventListener('message', handleAuthMessage);
+    
+    return () => {
+      window.removeEventListener('message', handleAuthMessage);
     };
   }, []);
 
@@ -291,26 +311,55 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
   const signInWithGoogle = async () => {
     try {
-      setIsLoading(true);
+      // Open a popup window for Google authentication
+      const width = 600;
+      const height = 600;
+      const left = window.innerWidth / 2 - width / 2;
+      const top = window.innerHeight / 2 - height / 2;
       
+      const popupWindow = window.open(
+        'about:blank',
+        'googleLogin',
+        `width=${width},height=${height},top=${top},left=${left}`
+      );
+      
+      if (!popupWindow) {
+        throw new Error('Popup blocked. Please allow popups for this site.');
+      }
+      
+      // Start the Google OAuth flow
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${window.location.origin}/process`,
+          redirectTo: `${window.location.origin}/auth/callback`,
+          skipBrowserRedirect: true,
         },
       });
       
       if (error) {
+        popupWindow.close();
         throw new Error(error.message);
       }
       
-      if (!data) {
-        throw new Error('Login with Google failed: No data returned');
+      if (!data || !data.url) {
+        popupWindow.close();
+        throw new Error('Failed to get authentication URL');
       }
       
+      // Navigate the popup to the auth URL
+      popupWindow.location.href = data.url;
+      
+      // Listen for the popup window to close
+      const checkPopupClosed = setInterval(() => {
+        if (popupWindow.closed) {
+          clearInterval(checkPopupClosed);
+          console.log('Auth popup was closed');
+        }
+      }, 500);
+      
       toast({
-        title: "Redirecting to Google",
-        description: "You'll be redirected to Google to sign in.",
+        title: "Google Authentication",
+        description: "Please continue in the popup window.",
       });
     } catch (error) {
       toast({
@@ -319,8 +368,6 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         variant: "destructive",
       });
       throw error;
-    } finally {
-      setIsLoading(false);
     }
   };
 

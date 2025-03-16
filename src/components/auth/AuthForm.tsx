@@ -1,3 +1,4 @@
+
 import * as React from "react";
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
@@ -131,6 +132,7 @@ export function AuthForm({ onComplete, redirectPath = "/process", initialView = 
       await signInWithGoogle();
     } catch (error) {
       console.error("Google sign in error:", error);
+      setIsSubmitting(false);
     }
   };
 
