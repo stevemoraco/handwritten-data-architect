@@ -19,12 +19,28 @@ export function AppLayout({ children }: AppLayoutProps) {
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false);
   const [showLoginModal, setShowLoginModal] = React.useState(false);
+  const [loginRedirectPath, setLoginRedirectPath] = React.useState("");
 
   const navigationItems = [
     { name: "Dashboard", href: "/" },
-    { name: "Documents", href: "/documents" },
-    { name: "Pipelines", href: "/pipelines" },
+    { name: "Documents", href: "/documents", requiresAuth: true },
+    { name: "Pipelines", href: "/pipelines", requiresAuth: true },
   ];
+
+  const handleNavigation = (item: { name: string; href: string; requiresAuth?: boolean }) => {
+    if (item.requiresAuth && !user) {
+      setLoginRedirectPath(item.href);
+      setShowLoginModal(true);
+      return;
+    }
+    // No need to use navigate here as the Link component will handle the navigation
+  };
+
+  const handleLoginComplete = () => {
+    setShowLoginModal(false);
+    // We would navigate to the redirect path here, but that functionality will be 
+    // implemented when those pages are created
+  };
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
@@ -38,13 +54,19 @@ export function AppLayout({ children }: AppLayoutProps) {
               {navigationItems.map((item) => (
                 <Link
                   key={item.name}
-                  to={item.href}
+                  to={item.requiresAuth && !user ? "#" : item.href}
                   className={cn(
                     "text-sm transition-colors hover:text-primary relative",
                     location.pathname === item.href
                       ? "text-foreground"
                       : "text-muted-foreground"
                   )}
+                  onClick={(e) => {
+                    if (item.requiresAuth && !user) {
+                      e.preventDefault();
+                      handleNavigation(item);
+                    }
+                  }}
                 >
                   {item.name}
                   {location.pathname === item.href && (
@@ -110,14 +132,21 @@ export function AppLayout({ children }: AppLayoutProps) {
               {navigationItems.map((item) => (
                 <Link
                   key={item.name}
-                  to={item.href}
+                  to={item.requiresAuth && !user ? "#" : item.href}
                   className={cn(
                     "text-sm transition-colors hover:text-primary py-2",
                     location.pathname === item.href
                       ? "text-foreground"
                       : "text-muted-foreground"
                   )}
-                  onClick={() => setIsMobileMenuOpen(false)}
+                  onClick={(e) => {
+                    if (item.requiresAuth && !user) {
+                      e.preventDefault();
+                      handleNavigation(item);
+                    } else {
+                      setIsMobileMenuOpen(false);
+                    }
+                  }}
                 >
                   {item.name}
                 </Link>
@@ -149,7 +178,8 @@ export function AppLayout({ children }: AppLayoutProps) {
       
       <LoginModal 
         open={showLoginModal} 
-        onOpenChange={setShowLoginModal} 
+        onOpenChange={setShowLoginModal}
+        onComplete={handleLoginComplete}
       />
     </div>
   );
