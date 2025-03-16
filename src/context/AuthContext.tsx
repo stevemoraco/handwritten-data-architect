@@ -153,6 +153,51 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const signInWithGoogle = async () => {
     try {
+      // Create popup window first
+      const width = 500;
+      const height = 700;
+      const left = window.screenX + (window.outerWidth - width) / 2;
+      const top = window.screenY + (window.outerHeight - height) / 2;
+      
+      const popup = window.open(
+        'about:blank',
+        'Google Sign In',
+        `width=${width},height=${height},left=${left},top=${top}`
+      );
+      
+      if (!popup) {
+        toast({
+          title: 'Popup Blocked',
+          description: 'Please allow popups for this site to use Google Sign In.',
+          variant: 'destructive',
+        });
+        return;
+      }
+      
+      // Set up listener for auth state change events from the popup
+      const messageListener = (event: MessageEvent) => {
+        if (
+          event.origin === window.location.origin && 
+          event.data?.type?.startsWith('SUPABASE_AUTH')
+        ) {
+          console.log('Received auth message from popup:', event.data);
+          
+          if (event.data.error) {
+            toast({
+              title: 'Google sign in failed',
+              description: event.data.error || 'An error occurred during Google sign in',
+              variant: 'destructive',
+            });
+          }
+          
+          // Remove the listener
+          window.removeEventListener('message', messageListener);
+        }
+      };
+      
+      window.addEventListener('message', messageListener);
+      
+      // Then initiate the Google sign-in
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
@@ -166,10 +211,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
       
       if (error) throw error;
       
-      // The URL that should be used for the popup
+      // Navigate the popup to the OAuth URL
       if (data && data.url) {
-        // We'll let the popup handle this URL
-        window.open(data.url, 'Google Sign In');
+        popup.location.href = data.url;
       }
     } catch (error: any) {
       toast({
@@ -177,7 +221,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
         description: error.message || 'An error occurred during Google sign in',
         variant: 'destructive',
       });
-      throw error;
     }
   };
 

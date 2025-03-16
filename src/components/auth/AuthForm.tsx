@@ -1,4 +1,3 @@
-
 import * as React from "react";
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
@@ -109,39 +108,7 @@ export function AuthForm({ onComplete, redirectPath = "/process", initialView = 
   const handleGoogleSignIn = async () => {
     try {
       setIsSubmitting(true);
-      
-      // Create popup window first
-      const width = 500;
-      const height = 600;
-      const left = window.screenX + (window.outerWidth - width) / 2;
-      const top = window.screenY + (window.outerHeight - height) / 2;
-      
-      const popup = window.open(
-        'about:blank',
-        'Google Sign In',
-        `width=${width},height=${height},left=${left},top=${top}`
-      );
-      
-      // Then initiate the Google sign-in
-      if (popup) {
-        await signInWithGoogle();
-        
-        // The auth context will handle the redirect, but we'll set a timer
-        // to close the popup if something goes wrong
-        setTimeout(() => {
-          if (!popup.closed) {
-            popup.location.href = `${window.location.origin}/auth/callback`;
-          }
-        }, 1000);
-      } else {
-        // Popup was blocked
-        toast({
-          title: "Popup Blocked",
-          description: "Please allow popups for this site to use Google Sign In.",
-          variant: "destructive"
-        });
-        setIsSubmitting(false);
-      }
+      await signInWithGoogle();
     } catch (error) {
       console.error("Google sign in error:", error);
       setIsSubmitting(false);

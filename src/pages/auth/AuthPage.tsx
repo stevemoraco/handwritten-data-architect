@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
@@ -23,23 +22,23 @@ export default function AuthPage() {
   const location = useLocation();
   const [searchParams] = useSearchParams();
   
-  // Get redirect path from URL query params or use default
   const redirectTo = searchParams.get('redirectTo') || '/';
   const errorMessage = searchParams.get('error');
   
   useEffect(() => {
-    // Set up listener for auth callback from popup
     const handleAuthCallback = (event: MessageEvent) => {
       if (
         event.origin === window.location.origin && 
-        event.data && 
-        event.data.type === 'SUPABASE_AUTH_CALLBACK'
+        (event.data?.type === 'SUPABASE_AUTH_CALLBACK' || 
+         event.data?.type === 'SUPABASE_AUTH_COMPLETE')
       ) {
+        console.log('Auth callback received:', event.data);
+        
         if (event.data.error) {
           console.error('Auth callback error:', event.data.error);
         } else {
-          console.log('Auth callback successful, redirecting');
-          // We'll let the auth state change handler in AuthContext take care of redirection
+          console.log('Auth callback successful');
+          // Auth state change in AuthContext will handle the session and redirection
         }
       }
     };
@@ -49,10 +48,9 @@ export default function AuthPage() {
     return () => {
       window.removeEventListener('message', handleAuthCallback);
     };
-  }, [navigate, redirectTo]);
+  }, []);
   
   useEffect(() => {
-    // Redirect to home/dashboard if already logged in
     if (user && !isLoading) {
       navigate(redirectTo, { replace: true });
     }
@@ -94,7 +92,6 @@ export default function AuthPage() {
     try {
       setIsSubmitting(true);
       await signInWithGoogle();
-      // We'll handle the redirect in the callback
     } catch (error) {
       console.error('Google sign in error:', error);
       setIsSubmitting(false);
