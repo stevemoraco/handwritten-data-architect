@@ -7,11 +7,9 @@ import { useNavigate } from "react-router-dom";
 import { LoginModal } from "@/components/auth/LoginModal";
 import { Card, CardContent } from "@/components/ui/card";
 import { ProgressSteps } from "@/components/ui/progress-steps";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Progress } from "@/components/ui/progress";
 import { FileUpload } from "@/components/ui/file-upload";
 import { useUpload } from "@/context/UploadContext";
-import { AppLayout } from "@/components/layout/AppLayout";
 
 export default function Index() {
   const { user } = useAuth();
@@ -59,8 +57,8 @@ export default function Index() {
   const uploadProgress = totalUploads > 0 ? Math.round((completedUploads / totalUploads) * 100) : 0;
   
   return (
-    <AppLayout>
-      <section className="py-10 text-center">
+    <>
+      <section className="py-6 text-center">
         <div className="container space-y-4 max-w-3xl">
           <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight">Handwriting Digitizer</h1>
           <p className="text-xl text-muted-foreground">
@@ -69,7 +67,7 @@ export default function Index() {
         </div>
       </section>
       
-      <section className="bg-muted/30 py-10">
+      <section className="bg-muted/30 py-6">
         <div className="container max-w-5xl">
           <div className="text-center mb-4">
             <ProgressSteps 
@@ -79,14 +77,14 @@ export default function Index() {
                 { id: "invite", label: "Invite Team", icon: <Users className="h-4 w-4" /> }
               ]} 
               currentStep={activeStep}
-              className="mb-6"
+              className="mb-4"
             />
           </div>
           
           <Card className="border-dashed bg-background">
-            <CardContent className="pt-6 pb-6">
+            <CardContent className="pt-4 pb-4">
               {activeStep === "upload" && (
-                <div className="flex flex-col items-center justify-center space-y-6">
+                <div className="flex flex-col items-center justify-center space-y-4">
                   <div className="rounded-full bg-primary/10 p-3">
                     <Upload className="h-8 w-8 text-primary" />
                   </div>
@@ -100,7 +98,7 @@ export default function Index() {
               )}
               
               {activeStep === "account" && (
-                <div className="flex flex-col items-center justify-center space-y-4">
+                <div className="flex flex-col items-center justify-center space-y-3">
                   <div className="rounded-full bg-primary/10 p-3">
                     <Shield className="h-8 w-8 text-primary" />
                   </div>
@@ -118,18 +116,18 @@ export default function Index() {
                         <span>Uploading {completedUploads} of {totalUploads} files</span>
                         <span>{uploadProgress}%</span>
                       </div>
-                      <Progress value={uploadProgress} className="h-2 mb-4" />
+                      <Progress value={uploadProgress} className="h-2 mb-3" />
                     </div>
                   )}
                   
-                  <Button onClick={() => setShowLoginModal(true)} className="mt-2">
+                  <Button onClick={() => setShowLoginModal(true)} className="mt-1">
                     Create Account or Sign In
                   </Button>
                 </div>
               )}
               
               {activeStep === "invite" && (
-                <div className="flex flex-col items-center justify-center space-y-4">
+                <div className="flex flex-col items-center justify-center space-y-3">
                   <div className="rounded-full bg-primary/10 p-3">
                     <Users className="h-8 w-8 text-primary" />
                   </div>
@@ -147,11 +145,11 @@ export default function Index() {
                         <span>{completedUploads} of {totalUploads} files processed</span>
                         <span>{uploadProgress}%</span>
                       </div>
-                      <Progress value={uploadProgress} className="h-2 mb-4" />
+                      <Progress value={uploadProgress} className="h-2 mb-3" />
                     </div>
                   )}
                   
-                  <div className="space-y-4 w-full max-w-md">
+                  <div className="space-y-3 w-full max-w-md">
                     <div className="flex space-x-2">
                       <input 
                         type="email" 
@@ -172,12 +170,12 @@ export default function Index() {
         </div>
       </section>
       
-      <section className="py-10">
+      <section className="py-6">
         <div className="container max-w-6xl">
-          <h2 className="text-2xl font-bold mb-6">How It Works</h2>
+          <h2 className="text-2xl font-bold mb-4">How It Works</h2>
           
-          <div className="grid md:grid-cols-3 gap-6">
-            <div className="space-y-3">
+          <div className="grid md:grid-cols-3 gap-4">
+            <div className="space-y-2">
               <div className="bg-primary/10 rounded-full p-3 inline-flex">
                 <Upload className="h-5 w-5 text-primary" />
               </div>
@@ -187,7 +185,7 @@ export default function Index() {
               </p>
             </div>
             
-            <div className="space-y-3">
+            <div className="space-y-2">
               <div className="bg-primary/10 rounded-full p-3 inline-flex">
                 <ClipboardCheck className="h-5 w-5 text-primary" />
               </div>
@@ -197,7 +195,7 @@ export default function Index() {
               </p>
             </div>
             
-            <div className="space-y-3">
+            <div className="space-y-2">
               <div className="bg-primary/10 rounded-full p-3 inline-flex">
                 <FileText className="h-5 w-5 text-primary" />
               </div>
@@ -216,6 +214,6 @@ export default function Index() {
         onComplete={handleLoginComplete}
         redirectPath="/process"
       />
-    </AppLayout>
+    </>
   );
 }
