@@ -51,6 +51,16 @@ export const processWithGemini = async (prompt: GeminiPrompt): Promise<string> =
         operation,
         model: "gemini-1.5-flash-latest"  // Explicitly specify model
       };
+      
+      // After schema generation, create a pipeline automatically
+      if (prompt.documentIds && prompt.documentIds.length > 0) {
+        try {
+          await createPipelineForDocuments(prompt.documentIds);
+        } catch (pipelineError) {
+          console.error("Error creating pipeline:", pipelineError);
+          // Continue with schema generation even if pipeline creation fails
+        }
+      }
     } else if (prompt.prompt.includes("extract data")) {
       operation = 'extractData';
       body = {
@@ -92,6 +102,33 @@ export const processWithGemini = async (prompt: GeminiPrompt): Promise<string> =
     return "Processing complete";
   } catch (error) {
     console.error("Error processing with Gemini:", error);
+    throw error;
+  }
+};
+
+// Create a pipeline for a set of documents
+export const createPipelineForDocuments = async (documentIds: string[]): Promise<any> => {
+  try {
+    console.log("Creating pipeline for documents:", documentIds);
+    
+    const response = await supabase.functions.invoke('pipeline-metadata', {
+      body: { documentIds }
+    });
+    
+    if (!response || !response.data) {
+      console.error("No response received from pipeline-metadata function");
+      throw new Error("No response received from pipeline-metadata function");
+    }
+    
+    if (response.data.error) {
+      console.error("Error creating pipeline:", response.data.error);
+      throw new Error(response.data.error);
+    }
+    
+    console.log("Pipeline created successfully:", response.data.pipeline);
+    return response.data.pipeline;
+  } catch (error) {
+    console.error("Error creating pipeline:", error);
     throw error;
   }
 };

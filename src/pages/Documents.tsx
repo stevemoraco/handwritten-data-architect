@@ -15,9 +15,15 @@ export default function Documents() {
   const { documents, isLoading, fetchUserDocuments } = useDocuments();
   const [filter, setFilter] = React.useState("all");
   const [searchTerm, setSearchTerm] = React.useState("");
+  const [isInitialLoad, setIsInitialLoad] = React.useState(true);
 
   React.useEffect(() => {
-    fetchUserDocuments();
+    const loadDocuments = async () => {
+      await fetchUserDocuments();
+      setIsInitialLoad(false);
+    };
+    
+    loadDocuments();
   }, [fetchUserDocuments]);
 
   const filteredDocuments = React.useMemo(() => {
@@ -72,6 +78,34 @@ export default function Documents() {
     };
   }, [documents]);
 
+  // Count by document type (pdf, image, etc)
+  const typeCount = React.useMemo(() => {
+    const counts: Record<string, number> = {};
+    
+    documents.forEach(doc => {
+      const type = doc.type || "unknown";
+      counts[type] = (counts[type] || 0) + 1;
+    });
+    
+    return counts;
+  }, [documents]);
+
+  // Show loading state only on initial load to prevent flickering during filtering
+  if (isLoading && isInitialLoad) {
+    return (
+      <div className="container py-10">
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-3xl font-bold">Documents</h1>
+        </div>
+        <Separator className="my-6" />
+        <div className="flex items-center justify-center p-12">
+          <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto"></div>
+          <p className="ml-4 text-muted-foreground">Loading documents...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="container py-10">
       <div className="flex items-center justify-between">
@@ -107,16 +141,18 @@ export default function Documents() {
             <SelectItem value="processing">Processing ({documentTypeCount.processing})</SelectItem>
             <SelectItem value="processed">Processed ({documentTypeCount.processed})</SelectItem>
             <SelectItem value="failed">Failed ({documentTypeCount.failed})</SelectItem>
+            
+            {/* Document type filters */}
+            {Object.entries(typeCount).map(([type, count]) => (
+              <SelectItem key={`type-${type}`} value={`type-${type}`}>
+                {type.toUpperCase()} Files ({count})
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </div>
       
-      {isLoading ? (
-        <div className="flex items-center justify-center p-12">
-          <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto"></div>
-          <p className="ml-4 text-muted-foreground">Loading documents...</p>
-        </div>
-      ) : filteredDocuments.length === 0 ? (
+      {filteredDocuments.length === 0 ? (
         <div className="text-center py-16 border rounded-lg bg-muted/20">
           <FolderIcon className="h-12 w-12 mx-auto text-muted-foreground" />
           <h3 className="mt-4 text-lg font-medium">No documents found</h3>
