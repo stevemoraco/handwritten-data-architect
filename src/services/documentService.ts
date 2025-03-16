@@ -1,4 +1,3 @@
-
 import { v4 as uuidv4 } from "uuid";
 import { supabase } from "@/integrations/supabase/client";
 import { Document, DocumentData, ProcessingLog, UploadProgress } from "@/types";
@@ -282,18 +281,56 @@ export async function transcribeDocument(documentId: string): Promise<string | n
   if (!documentId) return null;
 
   try {
-    // Call the process-document edge function with the transcribe operation
-    const response = await supabase.functions.invoke('process-document', {
-      body: { documentId, operation: 'transcribe' }
-    });
+    // Get the document pages and combine their text content
+    const { data: pages, error: pagesError } = await supabase
+      .from("document_pages")
+      .select("text_content")
+      .eq("document_id", documentId)
+      .order("page_number", { ascending: true });
 
-    if (!response.data.success) {
-      throw new Error(response.data.error || "Unknown error in transcription");
+    if (pagesError) {
+      throw new Error(`Failed to fetch document pages: ${pagesError.message}`);
     }
 
-    return response.data.result.transcription || null;
+    // Combine all page text contents
+    const transcription = pages
+      .map(page => page.text_content)
+      .filter(Boolean)
+      .join("\n\n");
+
+    // Update the document with the transcription
+    const { error: updateError } = await supabase
+      .from("documents")
+      .update({
+        transcription: transcription,
+        status: "processed"
+      })
+      .eq("id", documentId);
+
+    if (updateError) {
+      throw new Error(`Failed to update document with transcription: ${updateError.message}`);
+    }
+
+    // Log the successful transcription
+    await supabase.from("processing_logs").insert({
+      document_id: documentId,
+      action: "transcribe",
+      status: "success",
+      message: "Document transcribed successfully"
+    });
+
+    return transcription;
   } catch (error) {
     console.error("Error in transcribeDocument:", error);
+    
+    // Log the error
+    await supabase.from("processing_logs").insert({
+      document_id: documentId,
+      action: "transcribe", 
+      status: "error",
+      message: error instanceof Error ? error.message : "Unknown error in transcription"
+    });
+    
     return null;
   }
 }

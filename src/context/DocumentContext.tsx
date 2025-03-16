@@ -274,23 +274,28 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         message: `Starting text transcription for document ${documentId}`
       });
       
-      // Call the process-document function
-      const { data, error } = await supabase.functions.invoke('process-document', {
-        body: { documentId, userId: user.id }
-      });
+      // Instead of calling the process-document function, let's directly update the transcription
+      // using data we already have from the document_pages table
+      const { data: pages, error: pagesError } = await supabase
+        .from("document_pages")
+        .select("text_content")
+        .eq("document_id", documentId)
+        .order("page_number", { ascending: true });
       
-      if (error) {
-        throw new Error(`Failed to process document text: ${error.message}`);
+      if (pagesError) {
+        throw new Error(`Failed to fetch document pages: ${pagesError.message}`);
       }
       
-      if (!data || !data.success) {
-        throw new Error(data?.error || "Unknown error in document processing");
-      }
+      // Combine all page text contents
+      const transcription = pages
+        .map(page => page.text_content)
+        .filter(Boolean)
+        .join("\n\n");
       
       // Update the document with the transcription
       updateDocument(documentId, { 
         status: "processed",
-        transcription: data.transcription
+        transcription: transcription
       });
       
       // Update the transcription in the database
@@ -298,7 +303,7 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         .from("documents")
         .update({
           status: "processed",
-          transcription: data.transcription
+          transcription: transcription
         })
         .eq("id", documentId);
       
