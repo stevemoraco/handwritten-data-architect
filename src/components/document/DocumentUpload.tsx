@@ -75,7 +75,7 @@ export function DocumentUpload({
             toast({
               title: "Duplicate document detected",
               description: `${file.name} appears to be a duplicate of an existing document.`,
-              variant: "warning",
+              variant: "default", // Changed from "warning" to "default"
             });
             
             const { data: existingDoc } = await supabase
