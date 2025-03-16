@@ -5,11 +5,12 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Document } from "@/types";
-import { FileIcon, FilePenIcon, FileTextIcon, RotateCw, Trash2 } from "lucide-react";
+import { FileIcon, FilePenIcon, FileTextIcon, RotateCw, Trash2, FileImage } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { useDocuments } from "@/context/DocumentContext";
 import { toast } from "@/components/ui/use-toast";
+import { Progress } from "@/components/ui/progress";
 
 interface DocumentCardProps {
   document: Document;
@@ -28,6 +29,11 @@ export function DocumentCard({
 }: DocumentCardProps) {
   const { convertPdfToImages } = useDocuments();
   const [isConverting, setIsConverting] = React.useState(false);
+  const [progress, setProgress] = React.useState(document.processing_progress || 0);
+
+  React.useEffect(() => {
+    setProgress(document.processing_progress || 0);
+  }, [document.processing_progress]);
 
   const getStatusColor = (status: Document["status"]) => {
     switch (status) {
@@ -56,23 +62,21 @@ export function DocumentCard({
   };
 
   const handleConvert = async () => {
-    if (!document.thumbnails && document.status !== "processing") {
-      setIsConverting(true);
-      try {
-        await convertPdfToImages(document.id);
-        toast({
-          title: "Conversion complete",
-          description: "Document has been converted to images successfully.",
-        });
-      } catch (error) {
-        toast({
-          title: "Conversion failed",
-          description: error instanceof Error ? error.message : "An error occurred",
-          variant: "destructive",
-        });
-      } finally {
-        setIsConverting(false);
-      }
+    setIsConverting(true);
+    try {
+      await convertPdfToImages(document.id);
+      toast({
+        title: "Conversion started",
+        description: "PDF is being converted to images. This may take a moment.",
+      });
+    } catch (error) {
+      toast({
+        title: "Conversion failed",
+        description: error instanceof Error ? error.message : "An error occurred",
+        variant: "destructive",
+      });
+    } finally {
+      setIsConverting(false);
     }
   };
 
@@ -94,6 +98,18 @@ export function DocumentCard({
           </Badge>
         </div>
       </CardHeader>
+      
+      {document.status === "processing" && (
+        <CardContent className="px-4 pb-0 pt-0">
+          <div className="space-y-1">
+            <div className="flex justify-between text-xs text-muted-foreground">
+              <span>Processing...</span>
+              <span>{progress}%</span>
+            </div>
+            <Progress value={progress} className="h-1" />
+          </div>
+        </CardContent>
+      )}
       
       {document.thumbnails && document.thumbnails.length > 0 && (
         <CardContent className="p-0">
@@ -121,24 +137,41 @@ export function DocumentCard({
         </CardContent>
       )}
       
-      <Separator />
+      {document.error && (
+        <CardContent className="px-4 pb-0 pt-0">
+          <div className="text-xs text-destructive bg-destructive/10 p-2 rounded border border-destructive/20">
+            <p className="font-medium">Error:</p>
+            <p className="break-words">{document.error}</p>
+          </div>
+        </CardContent>
+      )}
+      
+      <Separator className="mt-4" />
       
       <CardFooter className="p-3 flex gap-2 flex-wrap text-xs">
-        {!document.thumbnails && document.status !== "processing" && (
+        {(!document.thumbnails || document.status === "failed") && (
           <Button
             size="sm"
             variant="outline"
             className="h-8 text-xs"
             onClick={handleConvert}
-            disabled={isConverting}
+            disabled={isConverting || document.status === "processing"}
           >
             {isConverting ? (
               <>
                 <RotateCw className="h-3 w-3 mr-1 animate-spin" />
                 Converting...
               </>
+            ) : document.thumbnails ? (
+              <>
+                <RotateCw className="h-3 w-3 mr-1" />
+                Retry Conversion
+              </>
             ) : (
-              "Convert to Images"
+              <>
+                <FileImage className="h-3 w-3 mr-1" />
+                Convert to Images
+              </>
             )}
           </Button>
         )}
@@ -157,6 +190,7 @@ export function DocumentCard({
           variant="outline"
           className="h-8 text-xs"
           onClick={onProcess}
+          disabled={document.status === "processing"}
         >
           Process
         </Button>
@@ -166,6 +200,7 @@ export function DocumentCard({
           variant="outline"
           className="h-8 text-xs ml-auto text-destructive hover:text-destructive hover:bg-destructive/10 hover:border-destructive/20"
           onClick={onDelete}
+          disabled={document.status === "processing"}
         >
           <Trash2 className="h-3 w-3 mr-1" />
           Delete

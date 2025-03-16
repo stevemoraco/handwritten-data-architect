@@ -55,13 +55,28 @@ serve(async (req) => {
 
     console.log(`Downloading PDF from URL: ${document.original_url}`);
 
-    // Download the PDF file
-    const response = await fetch(document.original_url);
+    // Encode the URL properly to handle special characters
+    const encodedUrl = encodeURI(document.original_url);
+    console.log(`Encoded URL: ${encodedUrl}`);
+
+    // Download the PDF file with proper headers
+    const response = await fetch(encodedUrl, {
+      headers: {
+        "Accept": "application/pdf",
+      },
+    });
+    
     if (!response.ok) {
-      throw new Error(`Failed to download PDF: ${response.statusText}`);
+      console.error("Failed to download PDF:", response.status, response.statusText);
+      throw new Error(`Failed to download PDF: ${response.status} ${response.statusText}`);
     }
 
     const pdfBytes = await response.arrayBuffer();
+    if (!pdfBytes || pdfBytes.byteLength === 0) {
+      throw new Error("Downloaded PDF is empty");
+    }
+    
+    console.log(`Successfully downloaded PDF, size: ${pdfBytes.byteLength} bytes`);
     
     // Load the PDF document
     const pdfDoc = await PDFDocument.load(pdfBytes);

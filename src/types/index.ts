@@ -1,4 +1,3 @@
-
 export interface User {
   id: string;
   email: string;
@@ -25,8 +24,8 @@ export interface Invitation {
 export interface Document {
   id: string;
   name: string;
-  type: 'pdf' | 'image';
-  status: 'uploaded' | 'processing' | 'processed' | 'failed';
+  type: "pdf" | "image";
+  status: "uploaded" | "processing" | "processed" | "failed";
   url: string;
   thumbnails?: string[];
   pageCount?: number;
@@ -34,8 +33,10 @@ export interface Document {
   createdAt: string;
   updatedAt: string;
   userId: string;
-  organizationId: string;
+  organizationId?: string;
   pipelineId?: string;
+  processing_progress?: number;
+  error?: string;
 }
 
 export interface DocumentSchema {
