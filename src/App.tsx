@@ -9,26 +9,32 @@ import NotFound from "./pages/NotFound";
 import DocumentProcess from "./pages/DocumentProcess";
 import { UploadProvider } from "./context/UploadContext";
 import { DocumentProvider } from "./context/DocumentContext";
+import { AuthProvider } from "./context/AuthContext";
+import { AppLayout } from "./components/layout/AppLayout";
 
 const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
-      <UploadProvider>
-        <DocumentProvider>
-          <Toaster />
-          <Sonner />
-          <BrowserRouter>
-            <Routes>
-              <Route path="/" element={<Index />} />
-              <Route path="/process" element={<DocumentProcess />} />
-              {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-          </BrowserRouter>
-        </DocumentProvider>
-      </UploadProvider>
+      <AuthProvider>
+        <UploadProvider>
+          <DocumentProvider>
+            <Toaster />
+            <Sonner />
+            <BrowserRouter>
+              <AppLayout>
+                <Routes>
+                  <Route path="/" element={<Index />} />
+                  <Route path="/process" element={<DocumentProcess />} />
+                  {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+                  <Route path="*" element={<NotFound />} />
+                </Routes>
+              </AppLayout>
+            </BrowserRouter>
+          </DocumentProvider>
+        </UploadProvider>
+      </AuthProvider>
     </TooltipProvider>
   </QueryClientProvider>
 );

@@ -4,7 +4,7 @@ import { Dashboard } from "@/components/dashboard/Dashboard";
 
 export default function Index() {
   return (
-    <div className="container py-10">
+    <div className="py-6">
       <Dashboard />
     </div>
   );
