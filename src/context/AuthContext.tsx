@@ -153,19 +153,24 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const signInWithGoogle = async () => {
     try {
-      const { error } = await supabase.auth.signInWithOAuth({
+      const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
           redirectTo: `${window.location.origin}/auth/callback`,
           queryParams: {
             access_type: 'offline',
             prompt: 'consent',
-          },
-          skipBrowserRedirect: true // This prevents automatic redirect
+          }
         }
       });
       
       if (error) throw error;
+      
+      // The URL that should be used for the popup
+      if (data && data.url) {
+        // We'll let the popup handle this URL
+        window.open(data.url, 'Google Sign In');
+      }
     } catch (error: any) {
       toast({
         title: 'Google sign in failed',

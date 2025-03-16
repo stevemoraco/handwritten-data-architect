@@ -23,6 +23,7 @@ interface FileUploadProps {
   onFilesUploaded?: (files: File[]) => void;
   className?: string;
   disabled?: boolean;
+  allowUnauthenticatedUpload?: boolean; // New prop to allow uploads without authentication
 }
 
 export interface FilePreview {
@@ -53,6 +54,7 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
   onFilesUploaded,
   className,
   disabled = false,
+  allowUnauthenticatedUpload = false, // Default to requiring authentication
 }, ref) => {
   const [files, setFiles] = useState<File[]>([]);
   const [filePreviews, setFilePreviews] = useState<FilePreview[]>([]);
@@ -62,7 +64,8 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
   
   const onDrop = useCallback(
     (acceptedFiles: File[]) => {
-      if (!user) {
+      // Check if user is authenticated or if unauthenticated uploads are allowed
+      if (!user && !allowUnauthenticatedUpload) {
         toast({
           title: "Authentication required",
           description: "You must be logged in to upload files",
@@ -78,18 +81,59 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
       if (newFiles.length > 0) {
         setFiles((currentFiles) => [...currentFiles, ...newFiles]);
         
-        newFiles.forEach(generateFilePreviews);
+        // Only generate previews if user is authenticated or if allowUnauthenticatedUpload is true
+        if (user || allowUnauthenticatedUpload) {
+          newFiles.forEach(file => {
+            // For unauthenticated users, just create a preview without uploading
+            if (!user && allowUnauthenticatedUpload) {
+              createLocalPreview(file);
+            } else {
+              generateFilePreviews(file);
+            }
+          });
+        }
         
         if (onFilesUploaded) {
           onFilesUploaded(newFiles);
         }
       }
     },
-    [files, onFilesUploaded, user, toast]
+    [files, onFilesUploaded, user, toast, allowUnauthenticatedUpload]
   );
 
+  // Create a local preview without uploading to storage
+  const createLocalPreview = (file: File) => {
+    const newPreview: FilePreview = {
+      file,
+      pages: [],
+      pageCount: 1,
+      isLoading: true
+    };
+    
+    setFilePreviews(prev => [...prev, newPreview]);
+    
+    // Just create a basic preview without actual processing
+    setTimeout(() => {
+      setFilePreviews(prev => 
+        prev.map(p => 
+          p.file === file 
+            ? { 
+                ...p, 
+                pageCount: 1,
+                isLoading: false,
+                pages: [{
+                  pageNumber: 1,
+                  dataUrl: '/placeholder.svg',
+                }]
+              }
+            : p
+        )
+      );
+    }, 500);
+  };
+
   const generateFilePreviews = async (file: File) => {
-    if (!user) {
+    if (!user && !allowUnauthenticatedUpload) {
       console.error("Cannot generate previews: User not authenticated");
       toast({
         title: "Authentication required",
@@ -108,6 +152,13 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
     
     setFilePreviews(prev => [...prev, newPreview]);
     
+    // For unauthenticated users in allowed mode, just create a preview without uploading
+    if (!user && allowUnauthenticatedUpload) {
+      createLocalPreview(file);
+      return;
+    }
+    
+    // Continue with normal preview generation and upload for authenticated users
     try {
       if (file.type.includes('pdf')) {
         const storageUrl = await uploadOriginalFile(file);
@@ -423,7 +474,7 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
     accept,
     maxFiles,
     maxSize,
-    disabled: disabled || isUploading || !user,
+    disabled: disabled || (isUploading && !allowUnauthenticatedUpload) || (!user && !allowUnauthenticatedUpload),
   });
 
   useImperativeHandle(ref, () => ({
@@ -442,7 +493,8 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
             'border-destructive/50 bg-destructive/5': isDragReject,
             'border-muted-foreground/20 hover:border-muted-foreground/30 hover:bg-muted/30':
               !isDragActive && !isDragReject && !disabled,
-            'border-muted-foreground/10 bg-muted/10 cursor-not-allowed opacity-60': disabled || isUploading || !user,
+            'border-muted-foreground/10 bg-muted/10 cursor-not-allowed opacity-60': 
+              disabled || (isUploading && !allowUnauthenticatedUpload) || (!user && !allowUnauthenticatedUpload),
           }
         )}
       >
@@ -450,14 +502,14 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
         <div className="flex flex-col items-center justify-center space-y-2">
           <div className="space-y-1">
             <p className="text-sm font-medium">
-              {!user ? "Please log in to upload files" : 
+              {!user && !allowUnauthenticatedUpload ? "Please log in to upload files" : 
                isDragActive ? "Drop the files here" : "Drag & drop files here"}
             </p>
             <p className="text-xs text-muted-foreground">
-              {user ? "or click to browse (PDF, JPG, PNG, GIF)" : "Login required for file upload"}
+              {user || allowUnauthenticatedUpload ? "or click to browse (PDF, JPG, PNG, GIF)" : "Login required for file upload"}
             </p>
           </div>
-          {!disabled && !isUploading && user && (
+          {!disabled && (user || allowUnauthenticatedUpload) && !isUploading && (
             <Button type="button" variant="outline" size="sm">
               Select Files
             </Button>
@@ -467,7 +519,7 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
               Uploading files...
             </p>
           )}
-          {maxFiles && user && (
+          {maxFiles && (user || allowUnauthenticatedUpload) && (
             <p className="text-xs text-muted-foreground">
               Upload up to {maxFiles} files (max {maxSize / 1048576}MB each)
             </p>

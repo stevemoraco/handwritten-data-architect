@@ -12,7 +12,13 @@ export default function AuthCallback() {
       try {
         // If this is not a callback with a hash (access_token), user may have cancelled
         if (!window.location.hash) {
-          window.close();
+          window.opener?.postMessage(
+            { type: 'SUPABASE_AUTH_CALLBACK', error: 'No access token found' },
+            window.location.origin
+          );
+          
+          // Close the popup after a short delay
+          setTimeout(() => window.close(), 2000);
           return;
         }
         
@@ -29,30 +35,41 @@ export default function AuthCallback() {
           
           if (error) {
             console.error('Error setting session:', error);
-          } else {
-            console.log('Session set successfully');
-          }
-          
-          // Let the opener know authentication is complete
-          if (window.opener) {
-            window.opener.postMessage(
-              { type: 'SUPABASE_AUTH_COMPLETE', accessToken, refreshToken },
+            window.opener?.postMessage(
+              { type: 'SUPABASE_AUTH_CALLBACK', error: error.message },
               window.location.origin
             );
-            
-            // Add a small delay before closing the window to ensure the message is sent
-            setTimeout(() => window.close(), 1000);
           } else {
-            window.close();
+            console.log('Session set successfully');
+            window.opener?.postMessage(
+              { type: 'SUPABASE_AUTH_COMPLETE', success: true },
+              window.location.origin
+            );
           }
+          
+          // Close the popup after a short delay to ensure the message is sent
+          setTimeout(() => window.close(), 2000);
         } else {
-          // No access token found, close the window
-          window.close();
+          // No access token found
+          window.opener?.postMessage(
+            { type: 'SUPABASE_AUTH_CALLBACK', error: 'No access token found' },
+            window.location.origin
+          );
+          
+          // Close the popup after a short delay
+          setTimeout(() => window.close(), 2000);
         }
       } catch (error) {
         console.error('Error handling auth callback:', error);
-        // Try to close the window anyway
-        window.close();
+        
+        // Notify the opener about the error
+        window.opener?.postMessage(
+          { type: 'SUPABASE_AUTH_CALLBACK', error: 'Authentication error occurred' },
+          window.location.origin
+        );
+        
+        // Close the popup anyway after a short delay
+        setTimeout(() => window.close(), 2000);
       }
     };
 
@@ -62,8 +79,9 @@ export default function AuthCallback() {
   return (
     <div className="flex items-center justify-center min-h-screen">
       <div className="text-center">
-        <h2 className="text-lg font-medium">Authentication Complete</h2>
-        <p className="mt-2">You can close this window and return to the application.</p>
+        <div className="w-8 h-8 border-4 border-primary/30 border-t-primary rounded-full animate-spin mx-auto mb-4"></div>
+        <h2 className="text-lg font-medium">Authentication Processing</h2>
+        <p className="mt-2">Please wait while we complete the authentication process...</p>
       </div>
     </div>
   );

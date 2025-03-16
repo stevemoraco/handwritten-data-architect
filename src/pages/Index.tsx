@@ -91,6 +91,7 @@ export default function Index() {
                     onFilesUploaded={handleFilesSelected}
                     accept={{ 'application/pdf': ['.pdf'] }}
                     className="max-w-md mx-auto"
+                    allowUnauthenticatedUpload={true} // Allow uploads without authentication for the onboarding flow
                   />
                 </div>
               )}
