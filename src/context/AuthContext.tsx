@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { User } from '@/types';
 import { supabase } from '@/integrations/supabase/client';
@@ -149,13 +150,33 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const signInWithGoogle = async () => {
     return new Promise<void>(async (resolve, reject) => {
       try {
+        const { data, error } = await supabase.auth.signInWithOAuth({
+          provider: 'google',
+          options: {
+            skipBrowserRedirect: true, // This is critical to prevent the main window from redirecting
+            queryParams: {
+              access_type: 'offline',
+              prompt: 'consent',
+            }
+          }
+        });
+        
+        if (error) {
+          throw error;
+        }
+        
+        if (!data?.url) {
+          throw new Error('No OAuth URL returned');
+        }
+        
+        // Open the popup with the URL we received
         const width = 500;
         const height = 700;
         const left = window.screenX + (window.outerWidth - width) / 2;
         const top = window.screenY + (window.outerHeight - height) / 2;
         
         const popup = window.open(
-          'about:blank',
+          data.url,
           'Google Sign In',
           `width=${width},height=${height},left=${left},top=${top}`
         );
@@ -170,10 +191,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
           return;
         }
         
+        // Setup message listener to detect when authentication is complete
         const messageHandler = (event: MessageEvent) => {
           if (
             event.origin === window.location.origin && 
-            event.data?.type?.startsWith('SUPABASE_AUTH')
+            event.data?.type === 'SUPABASE_AUTH_CALLBACK'
           ) {
             console.log('Received auth message from popup:', event.data);
             
@@ -187,6 +209,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
               });
               reject(new Error(event.data.error));
             } else {
+              // Just resolve the promise - the auth state listener will handle the UI updates
               resolve();
             }
           }
@@ -194,29 +217,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
         
         window.addEventListener('message', messageHandler);
         
-        const { data, error } = await supabase.auth.signInWithOAuth({
-          provider: 'google',
-          options: {
-            redirectTo: `${window.location.origin}/auth/callback`,
-            queryParams: {
-              access_type: 'offline',
-              prompt: 'consent',
-            }
+        // Set a timeout to reject the promise if we don't get a response within 2 minutes
+        const timeoutId = setTimeout(() => {
+          window.removeEventListener('message', messageHandler);
+          reject(new Error('Authentication timed out'));
+          
+          // If popup is still open, close it
+          if (popup && !popup.closed) {
+            popup.close();
           }
-        });
-        
-        if (error) {
-          window.removeEventListener('message', messageHandler);
-          reject(error);
-          throw error;
-        }
-        
-        if (data && data.url) {
-          popup.location.href = data.url;
-        } else {
-          window.removeEventListener('message', messageHandler);
-          reject(new Error('No OAuth URL returned'));
-        }
+        }, 120000); // 2 minutes
       } catch (error: any) {
         toast({
           title: 'Google sign in failed',

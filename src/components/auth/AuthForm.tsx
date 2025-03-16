@@ -1,4 +1,3 @@
-
 import * as React from "react";
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
@@ -46,15 +45,10 @@ export function AuthForm({ onComplete, redirectPath = "/process", initialView = 
     
     try {
       await signInWithEmail(email, password);
-      console.log("Login successful, redirecting to:", redirectPath);
-      
-      if (onComplete) {
-        onComplete();
-      } else {
-        navigate(redirectPath);
-      }
+      // Navigation will be handled by the useEffect when user state is updated
     } catch (error) {
       console.error("Login error:", error);
+    } finally {
       setIsSubmitting(false);
     }
   };
@@ -68,53 +62,49 @@ export function AuthForm({ onComplete, redirectPath = "/process", initialView = 
     
     try {
       await signUpWithEmail(email, password, name);
-      console.log("Registration successful, redirecting to:", redirectPath);
-      
-      if (onComplete) {
-        onComplete();
-      } else {
-        navigate(redirectPath);
-      }
+      // Navigation will be handled by the useEffect when user state is updated
     } catch (error) {
       console.error("Register error:", error);
+    } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleForgotPassword = () => {
-    if (isSubmitting) return;
-    
-    if (!email) {
-      toast({
-        title: "Email required",
-        description: "Please enter your email address first.",
-        variant: "destructive",
-      });
+  const handleForgotPassword = async () => {
+    if (isSubmitting || !email) {
+      if (!email) {
+        toast({
+          title: "Email required",
+          description: "Please enter your email address first.",
+          variant: "destructive",
+        });
+      }
       return;
     }
     
     setIsSubmitting(true);
     
-    forgotPassword(email)
-      .then(() => {
-        toast({
-          title: "Password reset email sent",
-          description: "If an account exists with this email, you'll receive a password reset link.",
-        });
-      })
-      .finally(() => {
-        setIsSubmitting(false);
+    try {
+      await forgotPassword(email);
+      toast({
+        title: "Password reset email sent",
+        description: "If an account exists with this email, you'll receive a password reset link.",
       });
+    } catch (error) {
+      console.error("Forgot password error:", error);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleGoogleSignIn = async () => {
     if (isSubmitting) return;
     
+    setIsSubmitting(true);
+    
     try {
-      setIsSubmitting(true);
       await signInWithGoogle();
-      // The navigation will be handled by the useEffect when the user state updates
-      // No need to navigate here - just wait for the promise to resolve
+      // Navigation will be handled by the useEffect when user state is updated
     } catch (error) {
       console.error("Google sign in error:", error);
     } finally {

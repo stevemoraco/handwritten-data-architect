@@ -26,32 +26,6 @@ export default function AuthPage() {
   const errorMessage = searchParams.get('error');
   
   useEffect(() => {
-    const handleAuthCallback = (event: MessageEvent) => {
-      if (
-        event.origin === window.location.origin && 
-        (event.data?.type === 'SUPABASE_AUTH_CALLBACK' || 
-         event.data?.type === 'SUPABASE_AUTH_COMPLETE')
-      ) {
-        console.log('Auth callback received in parent window:', event.data);
-        
-        if (event.data.error) {
-          console.error('Auth callback error:', event.data.error);
-        } else {
-          console.log('Auth callback successful');
-          // No need to navigate here - the auth state change listener in AuthContext
-          // will handle redirecting once the session is updated
-        }
-      }
-    };
-    
-    window.addEventListener('message', handleAuthCallback);
-    
-    return () => {
-      window.removeEventListener('message', handleAuthCallback);
-    };
-  }, []);
-  
-  useEffect(() => {
     if (user && !isLoading) {
       navigate(redirectTo, { replace: true });
     }
