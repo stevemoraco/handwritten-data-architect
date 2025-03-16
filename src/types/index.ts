@@ -27,17 +27,19 @@ export interface Document {
   type: "pdf" | "image";
   status: "uploaded" | "processing" | "processed" | "failed";
   url: string;
-  thumbnails?: string[];
-  pageCount?: number;
+  original_url?: string;
+  thumbnails: string[];
+  pageCount: number;
+  page_count?: number;
   transcription?: string;
+  processing_error?: string;
+  processing_progress?: number;
   createdAt: string;
+  created_at?: string;
   updatedAt: string;
   userId: string;
   organizationId?: string;
   pipelineId?: string;
-  processing_progress?: number;
-  error?: string;
-  processing_error?: string;
 }
 
 export interface DocumentSchema {
@@ -92,12 +94,11 @@ export interface DocumentPipeline {
 
 export interface ProcessingLog {
   id: string;
-  documentId: string;
-  pipelineId?: string;
+  document_id: string;
   action: string;
-  status: 'success' | 'warning' | 'error';
-  message: string;
-  timestamp: string;
+  status: "success" | "error";
+  message?: string;
+  created_at: string;
 }
 
 export interface DocumentData {
@@ -147,4 +148,12 @@ export interface GeminiPrompt {
   context?: string;
   includeImages?: boolean;
   includeTranscription?: boolean;
+}
+
+export interface DocumentPrompt {
+  id: string;
+  document_id: string;
+  prompt_type: string;
+  prompt_text: string;
+  created_at: string;
 }

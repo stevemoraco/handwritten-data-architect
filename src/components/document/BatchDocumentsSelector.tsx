@@ -77,6 +77,11 @@ export function BatchDocumentsSelector({
     navigate('/process', { state: { documentIds: [documentId] } });
   };
 
+  const handleUploadDocuments = () => {
+    // Navigate to the dashboard with the upload tab active
+    navigate('/?tab=upload');
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center p-8">
@@ -90,7 +95,7 @@ export function BatchDocumentsSelector({
       <div className="text-center p-8 border rounded-lg bg-muted/10">
         <h3 className="text-lg font-medium mb-2">No documents found</h3>
         <p className="text-muted-foreground mb-4">Upload documents to get started</p>
-        <Button onClick={() => navigate('/upload')}>Upload Documents</Button>
+        <Button onClick={handleUploadDocuments}>Upload Documents</Button>
       </div>
     );
   }

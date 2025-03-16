@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getPromptsForDocument } from "@/services/geminiService";
+import { DocumentPrompt } from "@/types";
 import { MessageSquare, Code, AlertTriangle } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
@@ -12,8 +13,8 @@ interface PromptDisplayProps {
 }
 
 export function PromptDisplay({ documentId }: PromptDisplayProps) {
-  const [prompts, setPrompts] = React.useState<any[]>([]);
-  const [activeTab, setActiveTab] = React.useState<string>("transcription");
+  const [prompts, setPrompts] = React.useState<DocumentPrompt[]>([]);
+  const [activeTab, setActiveTab] = React.useState<string>("");
   const [isLoading, setIsLoading] = React.useState<boolean>(true);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -24,6 +25,14 @@ export function PromptDisplay({ documentId }: PromptDisplayProps) {
       setIsLoading(true);
       const promptData = await getPromptsForDocument(documentId);
       setPrompts(promptData);
+      
+      // Set the first prompt type as the active tab if available
+      if (promptData.length > 0) {
+        const promptTypes = new Set(promptData.map(p => p.prompt_type));
+        const firstType = Array.from(promptTypes)[0];
+        setActiveTab(firstType);
+      }
+      
       setError(null);
     } catch (err) {
       console.error("Error loading prompts:", err);
@@ -38,7 +47,7 @@ export function PromptDisplay({ documentId }: PromptDisplayProps) {
   }, [loadPrompts]);
 
   const filteredPrompts = React.useMemo(() => {
-    return prompts.filter(p => p.prompt_type === activeTab);
+    return activeTab ? prompts.filter(p => p.prompt_type === activeTab) : [];
   }, [prompts, activeTab]);
 
   const promptTypes = React.useMemo(() => {
@@ -101,8 +110,8 @@ export function PromptDisplay({ documentId }: PromptDisplayProps) {
           {promptTypes.map((type) => (
             <TabsContent key={type} value={type}>
               {filteredPrompts.length > 0 ? (
-                filteredPrompts.map((prompt, index) => (
-                  <div key={index} className="mb-4">
+                filteredPrompts.map((prompt) => (
+                  <div key={prompt.id} className="mb-4">
                     <div className="flex justify-between items-center mb-2">
                       <Badge variant="outline">
                         {new Date(prompt.created_at).toLocaleString()}

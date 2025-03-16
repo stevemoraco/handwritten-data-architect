@@ -26,7 +26,7 @@ export default function Document() {
     if (documentId) {
       fetchLogs(documentId);
     }
-  }, [documentId]);
+  }, [documentId, fetchUserDocuments]);
 
   const fetchLogs = async (docId: string) => {
     setLogsLoading(true);

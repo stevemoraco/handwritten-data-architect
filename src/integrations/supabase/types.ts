@@ -88,6 +88,38 @@ export type Database = {
           },
         ]
       }
+      document_prompts: {
+        Row: {
+          created_at: string | null
+          document_id: string | null
+          id: string
+          prompt_text: string
+          prompt_type: string
+        }
+        Insert: {
+          created_at?: string | null
+          document_id?: string | null
+          id?: string
+          prompt_text: string
+          prompt_type: string
+        }
+        Update: {
+          created_at?: string | null
+          document_id?: string | null
+          id?: string
+          prompt_text?: string
+          prompt_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "document_prompts_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       document_schemas: {
         Row: {
           created_at: string

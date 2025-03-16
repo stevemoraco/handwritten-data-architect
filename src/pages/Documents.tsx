@@ -52,12 +52,17 @@ export default function Documents() {
     }
   };
 
+  const handleUploadDocuments = () => {
+    // Navigate to the dashboard with the upload tab active
+    navigate('/?tab=upload');
+  };
+
   return (
     <div className="container py-10">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">Documents</h1>
         <div className="flex gap-2">
-          <Button onClick={() => navigate('/process?tab=upload')} className="gap-2">
+          <Button onClick={handleUploadDocuments} className="gap-2">
             <PlusIcon className="h-4 w-4" /> Upload Documents
           </Button>
           <Button 

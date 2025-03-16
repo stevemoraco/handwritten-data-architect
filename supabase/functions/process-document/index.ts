@@ -1,674 +1,358 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.8.0";
+import { GoogleGenerativeAI, HarmBlockThreshold, HarmCategory } from "https://esm.sh/@google/generative-ai@0.1.1";
 
-// CORS headers for browser requests
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+const GOOGLE_API_KEY = Deno.env.get("GOOGLE_API_KEY") || "";
+
+const MODEL_NAME = "gemini-2.0-flash-lite";
+const MAX_ATTEMPTS = 3;
 
 serve(async (req) => {
-  // Handle CORS preflight request
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+  // CORS headers
+  const headers = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Content-Type": "application/json",
+  };
+
+  // Handle OPTIONS request for CORS
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers, status: 204 });
   }
 
   try {
-    const { documentId, documentIds, schemaId, operation, model = "gemini-2.0-flash-lite", includeImages = true, includeTranscription = false, prompt } = await req.json();
+    // Create Supabase client
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     
-    console.log(`Processing document operation: ${operation}`, { documentId, documentIds, schemaId, model });
+    // Parse request body
+    const { documentId, pageUrls } = await req.json();
     
-    // Initialize Supabase client
-    const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-    // Get Gemini API key
-    const geminiApiKey = Deno.env.get('GEMINI_API_KEY');
-    if (!geminiApiKey) {
-      throw new Error("Gemini API key not found");
-    }
-
-    try {
-      // Log start of operation
-      if (documentId) {
-        await supabase
-          .from('processing_logs')
-          .insert({
-            document_id: documentId,
-            action: `Gemini ${operation}`,
-            status: 'success',
-            message: `Started ${operation} operation`
-          });
-      }
-
-      let result;
-      
-      if (operation === 'transcribe') {
-        result = await transcribeDocument(documentId, model, geminiApiKey, supabase, includeImages, prompt);
-      } else if (operation === 'generateSchema') {
-        result = await generateSchema(documentIds || [documentId], model, geminiApiKey, supabase, includeTranscription);
-      } else if (operation === 'extractData') {
-        result = await extractData(documentId, schemaId, model, geminiApiKey, supabase, includeImages);
-      } else {
-        throw new Error(`Unsupported operation: ${operation}`);
-      }
-
-      // Log completion of operation
-      if (documentId) {
-        await supabase
-          .from('processing_logs')
-          .insert({
-            document_id: documentId,
-            action: `Gemini ${operation}`,
-            status: 'success',
-            message: `Completed ${operation} operation`
-          });
-      }
-
+    if (!documentId) {
       return new Response(
         JSON.stringify({ 
-          success: true, 
-          result,
-          operation,
-          documentId,
-          schemaId: result?.id || schemaId
+          success: false, 
+          error: "Missing documentId parameter" 
         }),
-        { 
-          headers: { 
-            ...corsHeaders, 
-            'Content-Type': 'application/json' 
-          } 
-        }
+        { headers, status: 400 }
       );
-    } catch (operationError) {
-      console.error(`Error in ${operation} operation:`, operationError);
+    }
+    
+    // Initialize Google Generative AI
+    if (!GOOGLE_API_KEY) {
+      console.error("GOOGLE_API_KEY is not set");
+      return new Response(
+        JSON.stringify({ 
+          success: false, 
+          error: "GOOGLE_API_KEY is not configured on the server" 
+        }), 
+        { headers, status: 500 }
+      );
+    }
+    
+    const genAI = new GoogleGenerativeAI(GOOGLE_API_KEY);
+    const model = genAI.getGenerativeModel({ 
+      model: MODEL_NAME,
+      safetySettings: [
+        {
+          category: HarmCategory.HARM_CATEGORY_HARASSMENT,
+          threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+        },
+        {
+          category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+          threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+        },
+        {
+          category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+          threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+        },
+        {
+          category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+          threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+        },
+      ],
+    });
+    
+    // Log the process start
+    await supabase.from("processing_logs").insert({
+      document_id: documentId,
+      action: "Gemini Transcription Started",
+      status: "success",
+      message: `Starting transcription with ${MODEL_NAME} model`
+    });
+    
+    // Update document status to processing
+    await supabase
+      .from("documents")
+      .update({
+        status: "processing",
+        processing_progress: 10,
+        processing_error: null
+      })
+      .eq("id", documentId);
       
-      // Enhanced error logging with complete error details
-      const errorDetails = {
-        message: operationError.message || "Unknown error",
-        stack: operationError.stack,
-        name: operationError.name,
-        operation,
-        documentId,
-        schemaId,
-        model,
-        context: operationError.context || {},
-        timestamp: new Date().toISOString()
-      };
+    // If pageUrls is not provided, fetch them from the database
+    let imagesToProcess = pageUrls || [];
+    if (!imagesToProcess.length) {
+      const { data: pages, error: pagesError } = await supabase
+        .from("document_pages")
+        .select("image_url")
+        .eq("document_id", documentId)
+        .order("page_number", { ascending: true });
       
-      console.error("FULL ERROR DETAILS:", JSON.stringify(errorDetails, null, 2));
-      
-      // Log error
-      if (documentId) {
-        await supabase
-          .from('processing_logs')
-          .insert({
-            document_id: documentId,
-            action: `Gemini ${operation}`,
-            status: 'error',
-            message: JSON.stringify(errorDetails)
-          });
+      if (pagesError) {
+        console.error("Error fetching page URLs:", pagesError);
+        throw new Error(`Failed to fetch page URLs: ${pagesError.message}`);
       }
       
-      throw operationError;
+      imagesToProcess = pages.map(page => page.image_url).filter(Boolean);
     }
+    
+    if (imagesToProcess.length === 0) {
+      throw new Error("No images to process for this document");
+    }
+    
+    console.log(`Processing ${imagesToProcess.length} images for document ${documentId}`);
+    
+    // Update progress
+    await supabase
+      .from("documents")
+      .update({ processing_progress: 20 })
+      .eq("id", documentId);
+      
+    // Create the prompt for document transcription
+    const systemPrompt = `
+I need you to transcribe the content from these document images into clean, formatted Markdown. 
+This is important:
+1. Preserve the exact text content from the document
+2. Maintain proper heading structure (use # for main titles, ## for subtitles, etc.)
+3. Represent tables using markdown table syntax with | and -
+4. Keep bullet points and numbered lists intact
+5. Maintain paragraph breaks and formatting
+6. If there are forms, represent form fields clearly
+7. Ignore watermarks, page numbers, or irrelevant headers/footers
+8. For any unclear or illegible text, indicate with [illegible]
+9. Your output should be valid Markdown that renders properly
+
+The transcription should be as close as possible to the original document while being well-structured in Markdown.
+`;
+
+    // Save the system prompt
+    await supabase.from("document_prompts").insert({
+      document_id: documentId,
+      prompt_type: "transcription",
+      prompt_text: systemPrompt
+    });
+    
+    // Update progress
+    await supabase
+      .from("documents")
+      .update({ processing_progress: 30 })
+      .eq("id", documentId);
+  
+    // Process images in batches to avoid timeout
+    const batchSize = 5;
+    const batches = [];
+    for (let i = 0; i < imagesToProcess.length; i += batchSize) {
+      batches.push(imagesToProcess.slice(i, i + batchSize));
+    }
+  
+    let transcriptions = [];
+    for (let i = 0; i < batches.length; i++) {
+      const batch = batches[i];
+      const batchNumber = i + 1;
+      
+      console.log(`Processing batch ${batchNumber}/${batches.length} (${batch.length} images)`);
+      
+      const batchPrompt = `
+This is batch ${batchNumber} of ${batches.length} from a document with ${imagesToProcess.length} pages.
+${systemPrompt}
+`;
+      
+      // Build the content parts array with images
+      const contentParts = [{ text: batchPrompt }];
+      
+      for (const imageUrl of batch) {
+        try {
+          const imageResponse = await fetch(imageUrl);
+          if (!imageResponse.ok) {
+            console.error(`Failed to fetch image: ${imageUrl}, status: ${imageResponse.status}`);
+            continue;
+          }
+          
+          const imageBlob = await imageResponse.blob();
+          const imagePart = {
+            inlineData: {
+              mimeType: imageResponse.headers.get("content-type") || "image/jpeg",
+              data: await blobToBase64(imageBlob),
+            },
+          };
+          
+          contentParts.push(imagePart);
+        } catch (err) {
+          console.error(`Error processing image ${imageUrl}:`, err);
+        }
+      }
+      
+      let attempt = 0;
+      let batchTranscription = "";
+      let success = false;
+      
+      while (attempt < MAX_ATTEMPTS && !success) {
+        attempt++;
+        try {
+          const result = await model.generateContent({
+            contents: [{ role: "user", parts: contentParts }],
+            generationConfig: {
+              temperature: 0.1,
+              topP: 0.8,
+              topK: 40,
+              maxOutputTokens: 8192,
+            },
+          });
+          
+          const response = result.response;
+          batchTranscription = response.text();
+          success = true;
+          
+        } catch (err) {
+          console.error(`Attempt ${attempt} failed for batch ${batchNumber}:`, err);
+          
+          // Log the error
+          await supabase.from("processing_logs").insert({
+            document_id: documentId,
+            action: `Batch ${batchNumber} Transcription Attempt ${attempt}`,
+            status: "error",
+            message: `Error: ${err.message}\n\nStack: ${err.stack || 'No stack trace'}\n\nFull error: ${JSON.stringify(err, null, 2)}`
+          });
+          
+          if (attempt >= MAX_ATTEMPTS) {
+            throw new Error(`Failed to process batch ${batchNumber} after ${MAX_ATTEMPTS} attempts: ${err.message}`);
+          }
+          
+          // Wait before retrying
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+      }
+      
+      transcriptions.push(batchTranscription);
+      
+      // Update progress
+      const progressPercentage = Math.min(30 + Math.round(60 * (i + 1) / batches.length), 90);
+      await supabase
+        .from("documents")
+        .update({ processing_progress: progressPercentage })
+        .eq("id", documentId);
+        
+      // Log successful batch
+      await supabase.from("processing_logs").insert({
+        document_id: documentId,
+        action: `Batch ${batchNumber} Transcription Complete`,
+        status: "success",
+        message: `Processed ${batch.length} images in batch ${batchNumber} of ${batches.length}`
+      });
+    }
+    
+    // Combine all transcriptions
+    const fullTranscription = transcriptions.join("\n\n");
+    
+    // Update the document with the transcription
+    await supabase
+      .from("documents")
+      .update({
+        status: "processed",
+        processing_progress: 100,
+        transcription: fullTranscription
+      })
+      .eq("id", documentId);
+      
+    // Log completion
+    await supabase.from("processing_logs").insert({
+      document_id: documentId,
+      action: "Transcription Complete",
+      status: "success",
+      message: `Transcribed ${imagesToProcess.length} pages successfully`
+    });
+    
+    return new Response(
+      JSON.stringify({
+        success: true,
+        transcription: fullTranscription,
+      }),
+      { headers, status: 200 }
+    );
+    
   } catch (error) {
     console.error("Error processing document:", error);
     
-    // Enhanced error response with complete error details
-    const detailedError = {
-      success: false,
-      error: error.message || "An unknown error occurred",
-      errorName: error.name,
-      errorStack: error.stack,
-      errorContext: error.context || {},
-      timestamp: new Date().toISOString()
+    // Log the complete error information
+    const errorDetails = {
+      message: error.message || "Unknown error",
+      stack: error.stack || "No stack trace",
+      name: error.name,
+      code: error.code,
+      statusCode: error.statusCode,
+      details: error.details,
+      fullError: JSON.stringify(error, Object.getOwnPropertyNames(error))
     };
     
-    console.error("DETAILED ERROR RESPONSE:", JSON.stringify(detailedError, null, 2));
+    console.error("Detailed error:", errorDetails);
+    
+    try {
+      // Create Supabase client
+      const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+      
+      // Parse request body to get documentId
+      let documentId = "";
+      try {
+        const body = await req.json();
+        documentId = body.documentId;
+      } catch (e) {
+        console.error("Failed to parse request body:", e);
+      }
+      
+      if (documentId) {
+        // Update document status to failed
+        await supabase
+          .from("documents")
+          .update({
+            status: "failed",
+            processing_error: errorDetails.message
+          })
+          .eq("id", documentId);
+          
+        // Log the error
+        await supabase.from("processing_logs").insert({
+          document_id: documentId,
+          action: "Transcription Failed",
+          status: "error",
+          message: JSON.stringify(errorDetails, null, 2)
+        });
+      }
+    } catch (logError) {
+      console.error("Failed to log error:", logError);
+    }
     
     return new Response(
-      JSON.stringify(detailedError),
-      { 
-        headers: { 
-          ...corsHeaders, 
-          'Content-Type': 'application/json' 
-        },
-        status: 500
-      }
+      JSON.stringify({
+        success: false,
+        error: errorDetails.message,
+        details: errorDetails
+      }),
+      { headers, status: 500 }
     );
   }
 });
 
-async function transcribeDocument(documentId: string, model: string, apiKey: string, supabase: any, includeImages: boolean, customPrompt?: string) {
-  console.log(`Transcribing document ${documentId} with model ${model}`);
-  
-  // Get document information
-  const { data: document, error: docError } = await supabase
-    .from('documents')
-    .select('*')
-    .eq('id', documentId)
-    .single();
-  
-  if (docError || !document) {
-    throw new Error(`Document not found: ${docError?.message || 'Unknown error'}`);
+async function blobToBase64(blob: Blob): Promise<string> {
+  const arrayBuffer = await blob.arrayBuffer();
+  const bytes = new Uint8Array(arrayBuffer);
+  let binary = "";
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
   }
-  
-  let context = "";
-  let imageUrls: string[] = [];
-  
-  // Get document pages for images if needed
-  if (includeImages) {
-    const { data: pages, error: pagesError } = await supabase
-      .from('document_pages')
-      .select('*')
-      .eq('document_id', documentId)
-      .order('page_number', { ascending: true });
-    
-    if (pagesError) {
-      console.error("Error fetching document pages:", pagesError);
-    } else if (pages && pages.length > 0) {
-      // Add page images to context
-      imageUrls = pages.map(page => page.image_url).filter(Boolean);
-      console.log(`Found ${imageUrls.length} page images for document ${documentId}`);
-    }
-  }
-  
-  // Build the prompt
-  const systemPrompt = customPrompt || `Please carefully examine the provided document images. This is a document that contains important information. 
-    
-Transcribe ALL the text content from these images into a clear, well-formatted markdown document. 
-    
-Important instructions:
-1. Maintain the original structure of the document as much as possible.
-2. Use headers (## and ###) to represent section titles and subtitles.
-3. Use lists (- or numbered) for items that appear in list format.
-4. Preserve the relationships between questions and answers.
-5. If handwriting is unclear, indicate with [illegible] but make your best guess if possible.
-6. Include ALL text content, including headers, footers, and any notes.
-7. Properly format any tables you find using markdown table syntax.
-
-The output should be a complete, accurate transcription that could be used as a text-only reference for the original document.`;
-
-  console.log("Sending transcription request to Gemini API", {
-    modelUsed: model, 
-    pageCount: imageUrls.length, 
-    documentName: document.name
-  });
-  
-  try {
-    const startTime = Date.now();
-    
-    // Prepare request payload
-    const payload: any = {
-      contents: [
-        {
-          role: "user",
-          parts: [
-            { text: systemPrompt }
-          ]
-        }
-      ],
-      generation_config: {
-        temperature: 0.1,
-        top_p: 0.95,
-        top_k: 40,
-        max_output_tokens: 4096,
-      }
-    };
-    
-    // Add images to the parts if available
-    if (imageUrls.length > 0) {
-      for (const imageUrl of imageUrls) {
-        try {
-          // Fetch the image and convert to base64
-          const imageResponse = await fetch(imageUrl);
-          if (!imageResponse.ok) {
-            console.error(`Failed to fetch image: ${imageUrl}`, imageResponse.status);
-            continue;
-          }
-          
-          const imageArrayBuffer = await imageResponse.arrayBuffer();
-          const base64 = btoa(String.fromCharCode(...new Uint8Array(imageArrayBuffer)));
-          const mimeType = imageResponse.headers.get('content-type') || 'image/jpeg';
-          
-          payload.contents[0].parts.push({
-            inline_data: {
-              mime_type: mimeType,
-              data: base64
-            }
-          });
-          
-          console.log(`Added image to request: ${imageUrl}`);
-        } catch (imageError) {
-          console.error(`Error processing image ${imageUrl}:`, imageError);
-        }
-      }
-    }
-    
-    // Call Gemini API
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload)
-    });
-    
-    if (!response.ok) {
-      const errorData = await response.text();
-      console.error("Gemini API error response:", errorData);
-      throw new Error(`Gemini API error: ${response.status} ${response.statusText}`);
-    }
-    
-    const data = await response.json();
-    console.log("Gemini API response:", JSON.stringify(data).substring(0, 500) + "...");
-    
-    if (!data.candidates || data.candidates.length === 0) {
-      throw new Error("No response from Gemini API");
-    }
-    
-    // Extract transcription from response
-    const transcription = data.candidates[0].content.parts.map((part: any) => part.text).join("\n");
-    const processingTime = Date.now() - startTime;
-    
-    console.log(`Transcription completed in ${processingTime}ms`);
-    
-    // Update document with transcription
-    const { error: updateError } = await supabase
-      .from('documents')
-      .update({
-        transcription: transcription,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', documentId);
-    
-    if (updateError) {
-      console.error("Error updating document with transcription:", updateError);
-    }
-    
-    return {
-      transcription: transcription,
-      processingTime: `${processingTime}ms`
-    };
-  } catch (error) {
-    console.error("Error in transcribeDocument:", error);
-    throw error;
-  }
-}
-
-async function generateSchema(documentIds: string[], model: string, apiKey: string, supabase: any, includeTranscription: boolean) {
-  console.log(`Generating schema for documents: ${documentIds.join(", ")}`);
-  
-  if (!documentIds.length) {
-    throw new Error("No document IDs provided");
-  }
-  
-  // Collect document information
-  const { data: documents, error: docsError } = await supabase
-    .from('documents')
-    .select('*')
-    .in('id', documentIds);
-  
-  if (docsError) {
-    throw new Error(`Error fetching documents: ${docsError.message}`);
-  }
-  
-  if (!documents || documents.length === 0) {
-    throw new Error("No documents found");
-  }
-  
-  console.log(`Found ${documents.length} documents for schema generation`);
-  
-  // Prepare context with document transcriptions
-  let context = "";
-  
-  if (includeTranscription) {
-    // Collect transcriptions from documents
-    documents.forEach((doc: any, index: number) => {
-      if (doc.transcription) {
-        context += `DOCUMENT ${index + 1}: ${doc.name}\n\n${doc.transcription}\n\n---\n\n`;
-      }
-    });
-  }
-  
-  // Build the prompt
-  const prompt = `Analyze the provided transcriptions of documents. I need you to design a data schema that can efficiently capture ALL information from these documents. 
-
-Create a structured schema with tables and fields that would work for extracting data from these and similar documents.
-
-Important requirements:
-1. Each logical section of the documents should be a separate table.
-2. Fields should capture specific data points with appropriate types (string, number, boolean, date, enum).
-3. Mark fields as required when they are critical for the document's purpose.
-4. Include a rationale explaining your design decisions.
-5. Suggest 3-5 potential improvements to make the schema more robust.
-
-Return your response as a JSON object with this structure:
-{
-  "schema": {
-    "name": "Schema name",
-    "description": "Brief description",
-    "tables": [
-      {
-        "name": "TableName",
-        "description": "Table purpose",
-        "fields": [
-          { 
-            "name": "FieldName", 
-            "type": "string|number|boolean|date|enum", 
-            "required": true|false,
-            "enumValues": ["value1", "value2"] // Only for enum types
-          }
-        ]
-      }
-    ],
-    "rationale": "Detailed explanation of schema design choices",
-    "suggestions": [
-      {
-        "description": "Suggestion description",
-        "type": "add|modify|remove",
-        "impact": "Explanation of the benefit"
-      }
-    ]
-  }
-}`;
-
-  // Call Gemini API
-  const payload = {
-    contents: [
-      {
-        role: "user",
-        parts: []
-      }
-    ],
-    generation_config: {
-      temperature: 0.2,
-      top_p: 0.95,
-      top_k: 40,
-      max_output_tokens: 8192,
-    }
-  };
-  
-  if (context) {
-    payload.contents[0].parts.push({ text: context });
-  }
-  
-  payload.contents[0].parts.push({ text: prompt });
-  
-  try {
-    console.log("Sending schema generation request to Gemini API");
-    
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload)
-    });
-    
-    if (!response.ok) {
-      const errorData = await response.text();
-      console.error("Gemini API error response:", errorData);
-      throw new Error(`Gemini API error: ${response.status} ${response.statusText}`);
-    }
-    
-    const data = await response.json();
-    
-    if (!data.candidates || data.candidates.length === 0) {
-      throw new Error("No response from Gemini API");
-    }
-    
-    // Extract schema from response
-    const schemaText = data.candidates[0].content.parts.map((part: any) => part.text).join("\n");
-    
-    // Parse schema JSON
-    let schema;
-    try {
-      const jsonMatch = schemaText.match(/```json\s*([\s\S]*?)\s*```|({[\s\S]*})/);
-      const jsonStr = jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : schemaText;
-      schema = JSON.parse(jsonStr.replace(/```json|```/g, '').trim());
-    } catch (parseError) {
-      console.error("Error parsing schema JSON:", parseError);
-      console.log("Raw schema text:", schemaText);
-      throw new Error("Failed to parse schema JSON from Gemini response");
-    }
-    
-    // Store schema in database
-    const schemaId = crypto.randomUUID();
-    const { error: insertError } = await supabase
-      .from('document_schemas')
-      .insert({
-        id: schemaId,
-        name: schema.schema?.name || `Schema for ${documents.length} document(s)`,
-        description: schema.schema?.description || "Automatically generated schema",
-        structure: schema.schema?.tables || [],
-        rationale: schema.schema?.rationale || "",
-        suggestions: schema.schema?.suggestions || [],
-        organization_id: documents[0].organization_id || documents[0].user_id
-      });
-    
-    if (insertError) {
-      console.error("Error storing schema:", insertError);
-    }
-    
-    return {
-      ...schema,
-      id: schemaId
-    };
-  } catch (error) {
-    console.error("Error in generateSchema:", error);
-    throw error;
-  }
-}
-
-async function extractData(documentId: string, schemaId: string, model: string, apiKey: string, supabase: any, includeImages: boolean) {
-  console.log(`Extracting data from document ${documentId} using schema ${schemaId}`);
-  
-  // Get document information
-  const { data: document, error: docError } = await supabase
-    .from('documents')
-    .select('*')
-    .eq('id', documentId)
-    .single();
-  
-  if (docError || !document) {
-    throw new Error(`Document not found: ${docError?.message || 'Unknown error'}`);
-  }
-  
-  // Get schema information
-  const { data: schema, error: schemaError } = await supabase
-    .from('document_schemas')
-    .select('*')
-    .eq('id', schemaId)
-    .single();
-  
-  if (schemaError || !schema) {
-    throw new Error(`Schema not found: ${schemaError?.message || 'Unknown error'}`);
-  }
-  
-  let imageUrls: string[] = [];
-  
-  // Get document pages for images if needed
-  if (includeImages) {
-    const { data: pages, error: pagesError } = await supabase
-      .from('document_pages')
-      .select('*')
-      .eq('document_id', documentId)
-      .order('page_number', { ascending: true });
-    
-    if (pagesError) {
-      console.error("Error fetching document pages:", pagesError);
-    } else if (pages && pages.length > 0) {
-      // Add page images to context
-      imageUrls = pages.map(page => page.image_url).filter(Boolean);
-    }
-  }
-  
-  // Build the prompt
-  const prompt = `Extract structured data from the provided document images according to the following schema. 
-
-Schema structure:
-${JSON.stringify(schema.structure, null, 2)}
-
-Instructions:
-1. Extract all relevant data from the document that matches the schema.
-2. For each field in each table, provide the corresponding value from the document.
-3. If a piece of information is not present in the document, use null.
-4. If handwriting is unclear, make your best guess and indicate confidence level.
-5. Return data in a structured JSON format matching the schema tables and fields.
-
-Return your response as a JSON object with this structure:
-{
-  "extractedData": {
-    "TableName1": {
-      "FieldName1": "extracted value",
-      "FieldName2": "extracted value"
-    },
-    "TableName2": {
-      "FieldName1": "extracted value",
-      "FieldName2": "extracted value"
-    }
-  },
-  "confidence": 0.95, // Overall confidence in extraction accuracy (0-1)
-  "processingTime": "X seconds"
-}`;
-
-  try {
-    const startTime = Date.now();
-    
-    // Prepare request payload
-    const payload: any = {
-      contents: [
-        {
-          role: "user",
-          parts: [
-            { text: prompt }
-          ]
-        }
-      ],
-      generation_config: {
-        temperature: 0.1,
-        top_p: 0.95,
-        top_k: 40,
-        max_output_tokens: 8192,
-      }
-    };
-    
-    // Add images to the parts if available
-    if (imageUrls.length > 0) {
-      for (const imageUrl of imageUrls) {
-        try {
-          // Fetch the image and convert to base64
-          const imageResponse = await fetch(imageUrl);
-          if (!imageResponse.ok) {
-            console.error(`Failed to fetch image: ${imageUrl}`, imageResponse.status);
-            continue;
-          }
-          
-          const imageArrayBuffer = await imageResponse.arrayBuffer();
-          const base64 = btoa(String.fromCharCode(...new Uint8Array(imageArrayBuffer)));
-          const mimeType = imageResponse.headers.get('content-type') || 'image/jpeg';
-          
-          payload.contents[0].parts.push({
-            inline_data: {
-              mime_type: mimeType,
-              data: base64
-            }
-          });
-        } catch (imageError) {
-          console.error(`Error processing image ${imageUrl}:`, imageError);
-        }
-      }
-    }
-    
-    // Call Gemini API
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload)
-    });
-    
-    if (!response.ok) {
-      const errorData = await response.text();
-      console.error("Gemini API error response:", errorData);
-      throw new Error(`Gemini API error: ${response.status} ${response.statusText}`);
-    }
-    
-    const data = await response.json();
-    
-    if (!data.candidates || data.candidates.length === 0) {
-      throw new Error("No response from Gemini API");
-    }
-    
-    // Extract extraction data from response
-    const extractionText = data.candidates[0].content.parts.map((part: any) => part.text).join("\n");
-    const processingTime = Date.now() - startTime;
-    
-    // Parse extraction JSON
-    let extractedData;
-    try {
-      const jsonMatch = extractionText.match(/```json\s*([\s\S]*?)\s*```|({[\s\S]*})/);
-      const jsonStr = jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : extractionText;
-      extractedData = JSON.parse(jsonStr.replace(/```json|```/g, '').trim());
-    } catch (parseError) {
-      console.error("Error parsing extraction JSON:", parseError);
-      console.log("Raw extraction text:", extractionText);
-      throw new Error("Failed to parse extraction JSON from Gemini response");
-    }
-    
-    // Store extracted data in database
-    if (extractedData.extractedData) {
-      // Extract data for storage
-      const dataToStore = [];
-      
-      for (const [tableName, fields] of Object.entries(extractedData.extractedData)) {
-        const tableObj = schema.structure.find((t: any) => t.name === tableName);
-        if (!tableObj) continue;
-        
-        for (const [fieldName, value] of Object.entries(fields as Record<string, any>)) {
-          const fieldObj = tableObj.fields.find((f: any) => f.name === fieldName);
-          if (!fieldObj) continue;
-          
-          dataToStore.push({
-            document_id: documentId,
-            table_id: tableObj.id,
-            field_id: fieldObj.id,
-            value: String(value),
-            confidence: extractedData.confidence || 0.9
-          });
-        }
-      }
-      
-      // Store data
-      if (dataToStore.length > 0) {
-        // Clear any existing data for this document
-        await supabase
-          .from('document_data')
-          .delete()
-          .eq('document_id', documentId);
-        
-        // Insert new data
-        const { error: insertError } = await supabase
-          .from('document_data')
-          .insert(dataToStore);
-        
-        if (insertError) {
-          console.error("Error storing extracted data:", insertError);
-        }
-      }
-    }
-    
-    return {
-      ...extractedData,
-      processingTime: `${processingTime}ms`
-    };
-  } catch (error) {
-    console.error("Error in extractData:", error);
-    throw error;
-  }
+  return btoa(binary);
 }
