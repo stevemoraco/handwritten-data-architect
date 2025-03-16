@@ -32,13 +32,14 @@ export default function AuthPage() {
         (event.data?.type === 'SUPABASE_AUTH_CALLBACK' || 
          event.data?.type === 'SUPABASE_AUTH_COMPLETE')
       ) {
-        console.log('Auth callback received:', event.data);
+        console.log('Auth callback received in parent window:', event.data);
         
         if (event.data.error) {
           console.error('Auth callback error:', event.data.error);
         } else {
           console.log('Auth callback successful');
-          // Auth state change in AuthContext will handle the session and redirection
+          // No need to navigate here - the auth state change listener in AuthContext
+          // will handle redirecting once the session is updated
         }
       }
     };

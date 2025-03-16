@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { User } from '@/types';
 import { supabase } from '@/integrations/supabase/client';
@@ -34,13 +33,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const { toast } = useToast();
 
   useEffect(() => {
-    // Initialize auth state from supabase session
     const fetchUser = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         
         if (session?.user) {
-          // Create a user object from the session data without relying on profiles table
           setUser({
             id: session.user.id,
             email: session.user.email || '',
@@ -60,7 +57,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     fetchUser();
 
-    // Set up auth state listener
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log('Auth state changed:', event);
       
@@ -68,7 +64,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
         console.log('User signed in:', session.user.email);
         
         try {
-          // Create a user object from the session data
           const userData: User = {
             id: session.user.id,
             email: session.user.email || '',
@@ -153,7 +148,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const signInWithGoogle = async () => {
     try {
-      // Create popup window first
       const width = 500;
       const height = 700;
       const left = window.screenX + (window.outerWidth - width) / 2;
@@ -174,7 +168,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
         return;
       }
       
-      // Set up listener for auth state change events from the popup
       const messageListener = (event: MessageEvent) => {
         if (
           event.origin === window.location.origin && 
@@ -190,14 +183,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
             });
           }
           
-          // Remove the listener
           window.removeEventListener('message', messageListener);
         }
       };
       
       window.addEventListener('message', messageListener);
       
-      // Then initiate the Google sign-in
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
@@ -211,7 +202,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
       
       if (error) throw error;
       
-      // Navigate the popup to the OAuth URL
       if (data && data.url) {
         popup.location.href = data.url;
       }
