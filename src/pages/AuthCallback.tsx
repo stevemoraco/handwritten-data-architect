@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 
 export default function AuthCallback() {
+  const [error, setError] = useState<string | null>(null);
+
   useEffect(() => {
     const handleCallback = async () => {
       // Get the hash fragment from the URL
@@ -18,7 +20,7 @@ export default function AuthCallback() {
           );
           
           // Close the popup after a short delay
-          setTimeout(() => window.close(), 2000);
+          setTimeout(() => window.close(), 500);
           return;
         }
         
@@ -47,8 +49,8 @@ export default function AuthCallback() {
             );
           }
           
-          // Close the popup after a short delay to ensure the message is sent
-          setTimeout(() => window.close(), 2000);
+          // Close the popup immediately to avoid loading the full app
+          window.close();
         } else {
           // No access token found
           window.opener?.postMessage(
@@ -56,8 +58,8 @@ export default function AuthCallback() {
             window.location.origin
           );
           
-          // Close the popup after a short delay
-          setTimeout(() => window.close(), 2000);
+          // Close the popup
+          window.close();
         }
       } catch (error) {
         console.error('Error handling auth callback:', error);
@@ -68,8 +70,8 @@ export default function AuthCallback() {
           window.location.origin
         );
         
-        // Close the popup anyway after a short delay
-        setTimeout(() => window.close(), 2000);
+        // Close the popup
+        window.close();
       }
     };
 
