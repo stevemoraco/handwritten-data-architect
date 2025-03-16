@@ -72,39 +72,48 @@ serve(async (req) => {
 
     console.log(`Processing document: ${document.name}, URL: ${document.original_url}`);
 
-    // Check if storage bucket exists and create it if it doesn't
+    // Create storage bucket if it doesn't exist
     const bucketName = 'document_files';
-    const { data: buckets, error: bucketsError } = await supabase
-      .storage
-      .listBuckets();
     
-    if (bucketsError) {
-      console.error("Error checking buckets:", bucketsError);
+    try {
+      const { data: buckets, error: bucketsError } = await supabase.storage.listBuckets();
+      
+      if (bucketsError) {
+        console.error("Error checking buckets:", bucketsError);
+        throw new Error(`Error checking storage buckets: ${bucketsError.message}`);
+      }
+      
+      const bucketExists = buckets.some(bucket => bucket.name === bucketName);
+      
+      if (!bucketExists) {
+        console.log(`Creating '${bucketName}' bucket as it doesn't exist`);
+        const { error: createBucketError } = await supabase.storage.createBucket(bucketName, {
+          public: true,
+          fileSizeLimit: 104857600 // 100MB
+        });
+        
+        if (createBucketError) {
+          console.error("Error creating bucket:", createBucketError);
+          throw new Error(`Failed to create storage bucket: ${createBucketError.message}`);
+        }
+        
+        // Set bucket as public
+        const { error: updateBucketError } = await supabase.storage.updateBucket(bucketName, {
+          public: true,
+          fileSizeLimit: 104857600 // 100MB
+        });
+        
+        if (updateBucketError) {
+          console.error("Error updating bucket:", updateBucketError);
+          throw new Error(`Failed to update storage bucket: ${updateBucketError.message}`);
+        }
+      }
+    } catch (bucketError) {
+      console.error("Bucket setup error:", bucketError);
       return responseWithCors({
         success: false,
-        error: `Error checking storage buckets: ${bucketsError.message}`
+        error: `Bucket setup error: ${bucketError.message}`
       }, 500);
-    }
-    
-    // Check if document_files bucket exists
-    const bucketExists = buckets.some(bucket => bucket.name === bucketName);
-    
-    if (!bucketExists) {
-      console.log(`Creating '${bucketName}' bucket as it doesn't exist`);
-      const { error: createBucketError } = await supabase
-        .storage
-        .createBucket(bucketName, {
-          public: true,
-          fileSizeLimit: 104857600, // 100MB
-        });
-      
-      if (createBucketError) {
-        console.error("Error creating bucket:", createBucketError);
-        return responseWithCors({
-          success: false,
-          error: `Failed to create storage bucket: ${createBucketError.message}`
-        }, 500);
-      }
     }
 
     // Update document status to processing
@@ -127,94 +136,174 @@ serve(async (req) => {
       });
 
     try {
-      // Instead of fetching the PDF directly, download it using Supabase storage
-      // This is because direct URL access might have permissions issues
+      // Prepare file path from document URL
       const filePathParts = document.original_url.split('/');
       const fileName = filePathParts[filePathParts.length - 1];
-      const filePath = `${userId}/${documentId}/${fileName}`;
+      const decodedFileName = decodeURIComponent(fileName);
+      const filePath = `${userId}/${documentId}/${decodedFileName}`;
       
       console.log(`Attempting to download file from storage path: ${filePath}`);
       
-      // Try to download file using Supabase storage
-      let pdfBuffer: ArrayBuffer;
+      // Try multiple approaches to get the PDF
+      let pdfBuffer: ArrayBuffer | null = null;
+      let fetchError: Error | null = null;
       
+      // First try: direct storage download
       try {
         const { data: fileData, error: downloadError } = await supabase
           .storage
           .from(bucketName)
           .download(filePath);
         
-        if (downloadError || !fileData) {
-          console.error("Error downloading file from storage:", downloadError);
-          throw new Error(`Failed to download PDF from storage: ${downloadError?.message || 'Unknown error'}`);
+        if (!downloadError && fileData) {
+          pdfBuffer = await fileData.arrayBuffer();
+          console.log(`Successfully downloaded file from storage (${pdfBuffer.byteLength} bytes)`);
+        } else {
+          fetchError = new Error(`Storage download failed: ${downloadError?.message || 'Unknown error'}`);
+          console.error(fetchError.message);
         }
-        
-        pdfBuffer = await fileData.arrayBuffer();
-        console.log(`Successfully downloaded file (${pdfBuffer.byteLength} bytes)`);
-      } catch (downloadError) {
-        console.error("Error in storage download, trying direct URL fetch:", downloadError);
-        
-        // Fallback to direct URL fetch
-        console.log(`Fetching PDF from URL: ${document.original_url}`);
-        let pdfResponse;
-        let pdfUrl = document.original_url;
-        
-        // Try with decoding URL components if needed
+      } catch (error) {
+        fetchError = error;
+        console.error("Error in storage download:", error);
+      }
+      
+      // Second try: with decoded path
+      if (!pdfBuffer) {
         try {
-          // Try with the original URL first
-          pdfResponse = await fetch(pdfUrl, {
+          const decodedPath = `${userId}/${documentId}/${decodedFileName}`;
+          console.log(`Trying with decoded path: ${decodedPath}`);
+          
+          const { data: fileData, error: downloadError } = await supabase
+            .storage
+            .from(bucketName)
+            .download(decodedPath);
+          
+          if (!downloadError && fileData) {
+            pdfBuffer = await fileData.arrayBuffer();
+            console.log(`Successfully downloaded file with decoded path (${pdfBuffer.byteLength} bytes)`);
+          } else {
+            console.error(`Decoded path download failed: ${downloadError?.message}`);
+          }
+        } catch (error) {
+          console.error("Error in decoded path download:", error);
+        }
+      }
+      
+      // Third try: direct URL fetch
+      if (!pdfBuffer) {
+        try {
+          // Try with the original URL
+          console.log(`Trying direct fetch from URL: ${document.original_url}`);
+          
+          const pdfResponse = await fetch(document.original_url, {
             headers: {
               'Accept': 'application/pdf',
               'Cache-Control': 'no-cache'
             }
           });
           
-          if (!pdfResponse.ok) {
-            // If that fails, try with decoded URL
-            pdfUrl = decodeURIComponent(document.original_url);
-            console.log(`Retrying with decoded URL: ${pdfUrl}`);
+          if (pdfResponse.ok) {
+            pdfBuffer = await pdfResponse.arrayBuffer();
+            console.log(`Successfully fetched PDF directly (${pdfBuffer.byteLength} bytes)`);
+          } else {
+            console.error(`Direct URL fetch failed: ${pdfResponse.status} ${pdfResponse.statusText}`);
             
-            pdfResponse = await fetch(pdfUrl, {
+            // Try with decoded URL
+            const decodedUrl = decodeURIComponent(document.original_url);
+            console.log(`Trying with decoded URL: ${decodedUrl}`);
+            
+            const decodedResponse = await fetch(decodedUrl, {
               headers: {
                 'Accept': 'application/pdf',
                 'Cache-Control': 'no-cache'
               }
             });
             
-            if (!pdfResponse.ok) {
-              throw new Error(`Failed to fetch PDF: ${pdfResponse.status} ${pdfResponse.statusText}`);
+            if (decodedResponse.ok) {
+              pdfBuffer = await decodedResponse.arrayBuffer();
+              console.log(`Successfully fetched PDF with decoded URL (${pdfBuffer.byteLength} bytes)`);
+            } else {
+              console.error(`Decoded URL fetch failed: ${decodedResponse.status} ${decodedResponse.statusText}`);
             }
           }
-        } catch (fetchError) {
-          console.error("All attempts to fetch PDF failed:", fetchError);
-          throw new Error(`Failed to fetch PDF: ${fetchError.message}`);
-        }
-        
-        pdfBuffer = await pdfResponse.arrayBuffer();
-        console.log(`Successfully fetched PDF directly (${pdfBuffer.byteLength} bytes)`);
-        
-        // Re-upload the file to storage now that we have it
-        try {
-          const { error: uploadError } = await supabase
-            .storage
-            .from(bucketName)
-            .upload(filePath, pdfBuffer, {
-              contentType: 'application/pdf',
-              upsert: true
-            });
-          
-          if (uploadError) {
-            console.error("Failed to upload PDF to storage:", uploadError);
-          } else {
-            console.log(`Re-uploaded PDF to storage path: ${filePath}`);
-          }
-        } catch (uploadError) {
-          console.error("Error during re-upload:", uploadError);
+        } catch (error) {
+          console.error("Error in direct URL fetch:", error);
         }
       }
+      
+      // Final try: Create a new signed URL and try that
+      if (!pdfBuffer) {
+        try {
+          console.log("Creating signed URL as last resort");
+          
+          const { data: signedUrlData, error: signedUrlError } = await supabase
+            .storage
+            .from(bucketName)
+            .createSignedUrl(filePath, 60); // 60 seconds expiry
+          
+          if (!signedUrlError && signedUrlData?.signedUrl) {
+            console.log(`Trying with signed URL: ${signedUrlData.signedUrl}`);
+            
+            const signedResponse = await fetch(signedUrlData.signedUrl, {
+              headers: {
+                'Accept': 'application/pdf',
+                'Cache-Control': 'no-cache'
+              }
+            });
+            
+            if (signedResponse.ok) {
+              pdfBuffer = await signedResponse.arrayBuffer();
+              console.log(`Successfully fetched PDF with signed URL (${pdfBuffer.byteLength} bytes)`);
+            } else {
+              console.error(`Signed URL fetch failed: ${signedResponse.status} ${signedResponse.statusText}`);
+            }
+          } else {
+            console.error(`Failed to create signed URL: ${signedUrlError?.message}`);
+          }
+        } catch (error) {
+          console.error("Error in signed URL fetch:", error);
+        }
+      }
+      
+      // If we still don't have the PDF after all attempts
+      if (!pdfBuffer) {
+        throw new Error(`Failed to fetch PDF after multiple attempts: ${fetchError?.message || 'Unknown error'}`);
+      }
+      
+      // Re-upload the file to storage to ensure it's accessible
+      try {
+        const { error: uploadError } = await supabase
+          .storage
+          .from(bucketName)
+          .upload(filePath, pdfBuffer, {
+            contentType: 'application/pdf',
+            upsert: true
+          });
+        
+        if (uploadError) {
+          console.error("Failed to re-upload PDF to storage:", uploadError);
+        } else {
+          console.log(`Re-uploaded PDF to storage path: ${filePath}`);
+          
+          // Update the document URL with the freshly uploaded file
+          const { data: publicUrlData } = supabase.storage
+            .from(bucketName)
+            .getPublicUrl(filePath);
+            
+          if (publicUrlData?.publicUrl) {
+            await supabase
+              .from('documents')
+              .update({ original_url: publicUrlData.publicUrl })
+              .eq('id', documentId);
+              
+            console.log(`Updated document URL to: ${publicUrlData.publicUrl}`);
+          }
+        }
+      } catch (uploadError) {
+        console.error("Error during re-upload:", uploadError);
+      }
 
-      // Determine page count based on file size
-      // This is a rough estimate - real implementation would parse the PDF
+      // Determine page count based on file size (rough estimate)
       const pageCount = Math.max(1, Math.ceil(pdfBuffer.byteLength / 50000));
       console.log(`Estimated ${pageCount} pages based on file size`);
 
@@ -268,7 +357,8 @@ serve(async (req) => {
         .update({
           status: 'processed',
           page_count: pageCount,
-          processing_progress: 100
+          processing_progress: 100,
+          original_url: document.original_url // Ensure the URL is preserved
         })
         .eq('id', documentId);
 
