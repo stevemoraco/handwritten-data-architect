@@ -37,6 +37,7 @@ export interface Document {
   pipelineId?: string;
   processing_progress?: number;
   error?: string;
+  processing_error?: string;
 }
 
 export interface DocumentSchema {
