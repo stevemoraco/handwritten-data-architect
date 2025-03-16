@@ -1,24 +1,23 @@
+
 import * as React from "react";
 import { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { FileText, Github, MenuIcon, Twitter } from "lucide-react";
-import { Link, useLocation } from "react-router-dom";
+import { FileText, Github, Loader2, MenuIcon, Twitter } from "lucide-react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
-import { LoginModal } from "@/components/auth/LoginModal";
 
 interface AppLayoutProps {
   children: ReactNode;
 }
 
 export function AppLayout({ children }: AppLayoutProps) {
-  const { user, logout } = useAuth();
+  const { user, isLoading, signOut } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false);
-  const [showLoginModal, setShowLoginModal] = React.useState(false);
-  const [loginRedirectPath, setLoginRedirectPath] = React.useState("");
 
   const navigationItems = [
     { name: "Dashboard", href: "/" },
@@ -28,17 +27,10 @@ export function AppLayout({ children }: AppLayoutProps) {
 
   const handleNavigation = (item: { name: string; href: string; requiresAuth?: boolean }) => {
     if (item.requiresAuth && !user) {
-      setLoginRedirectPath(item.href);
-      setShowLoginModal(true);
+      navigate(`/auth?redirectTo=${encodeURIComponent(item.href)}`);
       return;
     }
-    // No need to use navigate here as the Link component will handle the navigation
-  };
-
-  const handleLoginComplete = () => {
-    setShowLoginModal(false);
-    // We would navigate to the redirect path here, but that functionality will be 
-    // implemented when those pages are created
+    navigate(item.href);
   };
 
   return (
@@ -76,7 +68,11 @@ export function AppLayout({ children }: AppLayoutProps) {
             </nav>
           </div>
           <div className="flex items-center gap-4">
-            {user ? (
+            {isLoading ? (
+              <Button variant="ghost" size="icon" disabled>
+                <Loader2 className="h-5 w-5 animate-spin" />
+              </Button>
+            ) : user ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" className="relative h-9 w-9 rounded-full p-0">
@@ -102,7 +98,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                     <Link to="/settings">Settings</Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem
-                    onClick={() => logout()}
+                    onClick={() => signOut()}
                     className="text-destructive focus:text-destructive"
                   >
                     Log out
@@ -110,7 +106,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : (
-              <Button size="sm" onClick={() => setShowLoginModal(true)}>
+              <Button size="sm" onClick={() => navigate('/auth')}>
                 Login
               </Button>
             )}
@@ -267,12 +263,6 @@ export function AppLayout({ children }: AppLayoutProps) {
           </div>
         </div>
       </footer>
-      
-      <LoginModal 
-        open={showLoginModal} 
-        onOpenChange={setShowLoginModal}
-        onComplete={handleLoginComplete}
-      />
     </div>
   );
 }

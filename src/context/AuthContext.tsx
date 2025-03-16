@@ -1,425 +1,188 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { User } from '@/types';
-import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/integrations/supabase/client';
+import { useToast } from '@/hooks/use-toast';
 
 interface AuthContextType {
   user: User | null;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  register: (name: string, email: string, password: string) => Promise<void>;
-  logout: () => Promise<void>;
-  forgotPassword: (email: string) => Promise<void>;
-  resetPassword: (token: string, password: string) => Promise<void>;
+  signInWithEmail: (email: string, password: string) => Promise<void>;
+  signUpWithEmail: (email: string, password: string, name: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
+  signOut: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export const useAuth = () => {
+export function useAuth() {
   const context = useContext(AuthContext);
   if (context === undefined) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
-};
+}
 
 interface AuthProviderProps {
   children: ReactNode;
 }
 
-export const AuthProvider = ({ children }: AuthProviderProps) => {
+export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState(true);
+  const { toast } = useToast();
 
-  // Initialize auth state
   useEffect(() => {
-    const initializeAuth = async () => {
-      setIsLoading(true);
-      
+    // Initialize auth state from supabase session
+    const fetchUser = async () => {
       try {
-        // Get the initial session
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        const { data: { session } } = await supabase.auth.getSession();
         
-        if (sessionError) {
-          console.error('Error fetching session:', sessionError);
-          return;
-        }
-        
-        // If we have a session, get the user data
-        if (session) {
-          const { data: userData, error: userError } = await supabase.auth.getUser();
+        if (session?.user) {
+          const { data: profileData } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', session.user.id)
+            .single();
           
-          if (userError) {
-            console.error('Error fetching user data:', userError);
-            return;
-          }
-          
-          if (userData && userData.user) {
-            const currentUser: User = {
-              id: userData.user.id,
-              email: userData.user.email || '',
-              name: userData.user.user_metadata?.name || userData.user.email?.split('@')[0] || 'User',
-              createdAt: userData.user.created_at,
-              organizationId: userData.user.user_metadata?.organization_id || '',
-            };
-            
-            setUser(currentUser);
-            console.log('User initialized from session:', currentUser.email);
-          }
+          setUser({
+            id: session.user.id,
+            email: session.user.email || '',
+            name: profileData?.name || session.user.email?.split('@')[0] || 'User',
+            createdAt: session.user.created_at,
+            organizationId: profileData?.organization_id || ''
+          });
         }
       } catch (error) {
-        console.error('Failed to initialize auth:', error);
+        console.error('Error fetching user:', error);
       } finally {
         setIsLoading(false);
       }
     };
-    
-    initializeAuth();
-    
+
+    fetchUser();
+
     // Set up auth state listener
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('Auth state change:', event, session?.user?.email);
+      console.log('Auth state changed:', event);
       
       if (event === 'SIGNED_IN' && session) {
+        console.log('User signed in:', session.user.email);
+        
         try {
-          const { data: userData } = await supabase.auth.getUser();
+          const { data: profileData } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', session.user.id)
+            .single();
           
-          if (userData && userData.user) {
-            const currentUser: User = {
-              id: userData.user.id,
-              email: userData.user.email || '',
-              name: userData.user.user_metadata?.name || userData.user.email?.split('@')[0] || 'User',
-              createdAt: userData.user.created_at,
-              organizationId: userData.user.user_metadata?.organization_id || '',
-            };
-            
-            setUser(currentUser);
-            console.log('User set after sign in:', currentUser.email);
-          }
+          const userData: User = {
+            id: session.user.id,
+            email: session.user.email || '',
+            name: profileData?.name || session.user.email?.split('@')[0] || 'User',
+            createdAt: session.user.created_at,
+            organizationId: profileData?.organization_id || ''
+          };
+          
+          setUser(userData);
+          toast({
+            title: 'Signed in',
+            description: `Welcome${userData.name ? `, ${userData.name}` : ''}!`,
+          });
         } catch (error) {
-          console.error('Error updating user after sign in:', error);
+          console.error('Error fetching user profile:', error);
         }
       } else if (event === 'SIGNED_OUT') {
         setUser(null);
-        console.log('User signed out');
-      } else if (event === 'TOKEN_REFRESHED') {
-        console.log('Token refreshed');
-      } else if (event === 'USER_UPDATED') {
-        // Refresh user data if it's updated
-        try {
-          const { data: userData } = await supabase.auth.getUser();
-          
-          if (userData && userData.user) {
-            const currentUser: User = {
-              id: userData.user.id,
-              email: userData.user.email || '',
-              name: userData.user.user_metadata?.name || userData.user.email?.split('@')[0] || 'User',
-              createdAt: userData.user.created_at,
-              organizationId: userData.user.user_metadata?.organization_id || '',
-            };
-            
-            setUser(currentUser);
-            console.log('User updated:', currentUser.email);
-          }
-        } catch (error) {
-          console.error('Error updating user data:', error);
-        }
+        toast({
+          title: 'Signed out',
+          description: 'You have been signed out.',
+        });
       }
     });
-    
+
     return () => {
       authListener.subscription.unsubscribe();
     };
-  }, []);
+  }, [toast]);
 
-  // Function to handle window message events for the popup
-  useEffect(() => {
-    const handleAuthMessage = async (event: MessageEvent) => {
-      // Only accept messages from the same origin for security
-      if (event.origin !== window.location.origin) return;
+  const signInWithEmail = async (email: string, password: string) => {
+    try {
+      setIsLoading(true);
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
       
-      if (event.data?.type === 'SUPABASE_AUTH_COMPLETE') {
-        console.log('Auth popup completed, data received:', event.data);
-        
-        // If tokens were received, set the session
-        if (event.data.accessToken) {
-          try {
-            const { data, error } = await supabase.auth.setSession({
-              access_token: event.data.accessToken,
-              refresh_token: event.data.refreshToken || '',
-            });
-            
-            if (error) {
-              console.error('Error setting session from popup data:', error);
-              toast({
-                title: "Authentication failed",
-                description: error.message,
-                variant: "destructive",
-              });
-            } else {
-              console.log('Session set successfully from popup data');
-              
-              // Show success toast
-              toast({
-                title: "Signed in successfully",
-                description: "You are now logged in.",
-              });
-              
-              // Fetch and set the user data immediately rather than waiting for the auth listener
-              const { data: userData } = await supabase.auth.getUser();
-              
-              if (userData && userData.user) {
-                const currentUser: User = {
-                  id: userData.user.id,
-                  email: userData.user.email || '',
-                  name: userData.user.user_metadata?.name || userData.user.email?.split('@')[0] || 'User',
-                  createdAt: userData.user.created_at,
-                  organizationId: userData.user.user_metadata?.organization_id || '',
-                };
-                
-                setUser(currentUser);
-                console.log('User set immediately after popup auth:', currentUser.email);
-              }
-            }
-          } catch (err) {
-            console.error('Failed to process popup auth data:', err);
-            toast({
-              title: "Authentication failed",
-              description: "Failed to complete authentication process.",
-              variant: "destructive",
-            });
-          }
-        }
-      }
-    };
+      if (error) throw error;
+    } catch (error: any) {
+      toast({
+        title: 'Sign in failed',
+        description: error.message || 'An error occurred during sign in',
+        variant: 'destructive',
+      });
+      throw error;
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-    window.addEventListener('message', handleAuthMessage);
-    
-    return () => {
-      window.removeEventListener('message', handleAuthMessage);
-    };
-  }, []);
-
-  const login = async (email: string, password: string) => {
+  const signUpWithEmail = async (email: string, password: string, name: string) => {
     try {
       setIsLoading(true);
       
-      // Check if user is already logged in
-      const { data: currentSession } = await supabase.auth.getSession();
-      if (currentSession.session) {
-        console.log('User is already logged in:', currentSession.session.user.email);
-        toast({
-          title: "Already logged in",
-          description: "You are already logged in with this account.",
-        });
-        return;
-      }
-      
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-      
-      if (error) {
-        throw new Error(error.message);
-      }
-      
-      if (!data.user) {
-        throw new Error('Login failed: No user returned');
-      }
-      
-      // User will be set by the auth state listener
-      toast({
-        title: "Login successful",
-        description: "Welcome back!",
-      });
-    } catch (error) {
-      toast({
-        title: "Login failed",
-        description: error instanceof Error ? error.message : "An unknown error occurred",
-        variant: "destructive",
-      });
-      throw error;
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const register = async (name: string, email: string, password: string) => {
-    setIsLoading(true);
-    try {
-      const { data, error } = await supabase.auth.signUp({
+      const { error } = await supabase.auth.signUp({
         email,
         password,
         options: {
-          data: {
-            name,
-          },
-        },
+          data: { name }
+        }
       });
       
-      if (error) {
-        throw new Error(error.message);
-      }
+      if (error) throw error;
       
-      if (!data.user) {
-        throw new Error('Registration failed: No user returned');
-      }
-      
-      // User will be set by the auth state listener
       toast({
-        title: "Registration successful",
-        description: "Your account has been created successfully.",
+        title: 'Account created',
+        description: 'Your account has been created successfully.',
       });
-    } catch (error) {
+    } catch (error: any) {
       toast({
-        title: "Registration failed",
-        description: error instanceof Error ? error.message : "An unknown error occurred",
-        variant: "destructive",
+        title: 'Sign up failed',
+        description: error.message || 'An error occurred during sign up',
+        variant: 'destructive',
       });
       throw error;
     } finally {
       setIsLoading(false);
-    }
-  };
-
-  const logout = async () => {
-    setIsLoading(true);
-    try {
-      const { error } = await supabase.auth.signOut();
-      
-      if (error) {
-        throw new Error(error.message);
-      }
-      
-      // User will be cleared by the auth state listener
-      toast({
-        title: "Logged out",
-        description: "You have been successfully logged out.",
-      });
-    } catch (error) {
-      toast({
-        title: "Logout failed",
-        description: error instanceof Error ? error.message : "An unknown error occurred",
-        variant: "destructive",
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const forgotPassword = async (email: string) => {
-    try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/reset-password`,
-      });
-      
-      if (error) {
-        throw new Error(error.message);
-      }
-      
-      toast({
-        title: "Password reset email sent",
-        description: "Check your email for a link to reset your password.",
-      });
-    } catch (error) {
-      toast({
-        title: "Password reset failed",
-        description: error instanceof Error ? error.message : "An unknown error occurred",
-        variant: "destructive",
-      });
-      throw error;
-    }
-  };
-
-  const resetPassword = async (token: string, password: string) => {
-    try {
-      const { error } = await supabase.auth.updateUser({
-        password,
-      });
-      
-      if (error) {
-        throw new Error(error.message);
-      }
-      
-      toast({
-        title: "Password reset successful",
-        description: "Your password has been updated successfully.",
-      });
-    } catch (error) {
-      toast({
-        title: "Password reset failed",
-        description: error instanceof Error ? error.message : "An unknown error occurred",
-        variant: "destructive",
-      });
-      throw error;
     }
   };
 
   const signInWithGoogle = async () => {
     try {
-      // Open a popup window for Google authentication
-      const width = 600;
-      const height = 600;
-      const left = window.innerWidth / 2 - width / 2;
-      const top = window.innerHeight / 2 - height / 2;
-      
-      const popupWindow = window.open(
-        'about:blank',
-        'googleLogin',
-        `width=${width},height=${height},top=${top},left=${left}`
-      );
-      
-      if (!popupWindow) {
-        throw new Error('Popup blocked. Please allow popups for this site.');
-      }
-      
-      // Start the Google OAuth flow
-      const { data, error } = await supabase.auth.signInWithOAuth({
+      const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
-          skipBrowserRedirect: true,
-        },
-      });
-      
-      if (error) {
-        popupWindow.close();
-        throw new Error(error.message);
-      }
-      
-      if (!data || !data.url) {
-        popupWindow.close();
-        throw new Error('Failed to get authentication URL');
-      }
-      
-      // Navigate the popup to the auth URL
-      popupWindow.location.href = data.url;
-      
-      // Listen for the popup window to close
-      const checkPopupClosed = setInterval(() => {
-        if (popupWindow.closed) {
-          clearInterval(checkPopupClosed);
-          console.log('Auth popup was closed manually');
-          // If popup is closed manually without completing auth, show a message
-          toast({
-            title: "Authentication canceled",
-            description: "The authentication process was canceled.",
-          });
+          redirectTo: `${window.location.origin}/auth/callback`
         }
-      }, 500);
-      
-      toast({
-        title: "Google Authentication",
-        description: "Please continue in the popup window.",
       });
-    } catch (error) {
+      
+      if (error) throw error;
+    } catch (error: any) {
       toast({
-        title: "Google login failed",
-        description: error instanceof Error ? error.message : "An unknown error occurred",
-        variant: "destructive",
+        title: 'Google sign in failed',
+        description: error.message || 'An error occurred during Google sign in',
+        variant: 'destructive',
+      });
+      throw error;
+    }
+  };
+
+  const signOut = async () => {
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+    } catch (error: any) {
+      toast({
+        title: 'Sign out failed',
+        description: error.message || 'An error occurred during sign out',
+        variant: 'destructive',
       });
       throw error;
     }
@@ -430,15 +193,13 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       value={{
         user,
         isLoading,
-        login,
-        register,
-        logout,
-        forgotPassword,
-        resetPassword,
+        signInWithEmail,
+        signUpWithEmail,
         signInWithGoogle,
+        signOut
       }}
     >
       {children}
     </AuthContext.Provider>
   );
-};
+}

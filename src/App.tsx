@@ -15,7 +15,8 @@ import SOC2 from "./pages/SOC2";
 import Terms from "./pages/Terms";
 import Privacy from "./pages/Privacy";
 import DocumentProcess from "./pages/DocumentProcess";
-import AuthCallback from "./pages/AuthCallback";
+import AuthPage from "./pages/auth/AuthPage";
+import AuthCallback from "./pages/auth/AuthCallback";
 import { Toaster } from "./components/ui/toaster";
 import { AuthProvider } from "./context/AuthContext";
 import { UploadProvider } from "./context/UploadContext";
@@ -29,6 +30,7 @@ function App() {
         <AuthProvider>
           <UploadProvider>
             <Routes>
+              <Route path="/auth" element={<AuthPage />} />
               <Route path="/auth/callback" element={<AuthCallback />} />
               <Route
                 path="/"
