@@ -24,7 +24,7 @@ export function FileUpload({
     'image/*': ['.jpg', '.jpeg', '.png', '.gif'],
   },
   maxFiles = 10,
-  maxSize = 10485760, // 10MB
+  maxSize = 104857600, // 100MB (increased from 10MB)
   onFilesUploaded,
   className,
   disabled = false,

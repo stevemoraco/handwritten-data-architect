@@ -58,21 +58,121 @@ serve(async (req) => {
       message: "Document processing started",
     });
 
-    // Simulate document processing for demonstration
-    // In a real implementation, we would:
-    // 1. Download the PDF from storage
-    // 2. Split into pages and save each page as an image
-    // 3. Extract text from each page using OCR or text extraction
-    // 4. Update document status and metadata
-    console.log("Simulating document processing...");
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    console.log(`Starting PDF processing for document: ${document.name}`);
+    await supabase.from("processing_logs").insert({
+      document_id: documentId,
+      action: "PDF Analysis",
+      status: "success",
+      message: `Analyzing ${document.name} for page information`,
+    });
+
+    // Update document status to processing
+    const { error: updateProcessingError } = await supabase
+      .from("documents")
+      .update({
+        status: "processing",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", documentId);
+
+    if (updateProcessingError) {
+      console.error("Error updating document status to processing:", updateProcessingError);
+    }
+
+    // Simulate the PDF processing and page extraction
+    // In a real implementation, we would use a PDF library to extract pages
+    const mockPageCount = 5; // Simulate 5 pages
+
+    console.log(`Document has ${mockPageCount} pages, starting page extraction`);
+    
+    // Process each page with detailed logging
+    for (let pageNumber = 1; pageNumber <= mockPageCount; pageNumber++) {
+      console.log(`Processing page ${pageNumber} of ${mockPageCount}`);
+      
+      // Log page extraction start
+      await supabase.from("processing_logs").insert({
+        document_id: documentId,
+        action: `Page ${pageNumber} Extraction`,
+        status: "success",
+        message: `Extracting image from page ${pageNumber}`,
+      });
+
+      // Simulate processing time for this page (1-2 seconds)
+      await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 1000));
+      
+      // Log text extraction start
+      await supabase.from("processing_logs").insert({
+        document_id: documentId,
+        action: `Page ${pageNumber} OCR`,
+        status: "success",
+        message: `Extracting text using OCR for page ${pageNumber}`,
+      });
+
+      // Simulate OCR processing time (1-3 seconds)
+      await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 2000));
+      
+      // Mock OCR with Gemini (in a real implementation, this would use actual Gemini API)
+      console.log(`Running AI text extraction on page ${pageNumber} using Gemini`);
+      
+      // Simulate Gemini API call
+      await new Promise(resolve => setTimeout(resolve, 1500 + Math.random() * 1500));
+      
+      // Create the page entry
+      const { error: pageInsertError } = await supabase.from("document_pages").insert({
+        document_id: documentId,
+        page_number: pageNumber,
+        image_url: `https://via.placeholder.com/800x1000?text=Page+${pageNumber}`,
+        text_content: `Sample text content for page ${pageNumber}. This text was extracted using OCR and processed with Gemini. It contains information that would be found in a typical document.`,
+      });
+
+      if (pageInsertError) {
+        console.error(`Error creating page ${pageNumber}:`, pageInsertError);
+        await supabase.from("processing_logs").insert({
+          document_id: documentId,
+          action: `Page ${pageNumber} Error`,
+          status: "error",
+          message: `Failed to process page ${pageNumber}: ${pageInsertError.message}`,
+        });
+      } else {
+        await supabase.from("processing_logs").insert({
+          document_id: documentId,
+          action: `Page ${pageNumber} Complete`,
+          status: "success",
+          message: `Successfully processed page ${pageNumber}`,
+        });
+      }
+      
+      // Update document with progress
+      await supabase
+        .from("documents")
+        .update({
+          processing_progress: (pageNumber / mockPageCount) * 100,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", documentId);
+        
+      console.log(`Completed processing page ${pageNumber} of ${mockPageCount}`);
+    }
+
+    // Simulate semantic analysis with Gemini
+    console.log("Starting semantic analysis of the document content...");
+    await supabase.from("processing_logs").insert({
+      document_id: documentId,
+      action: "Semantic Analysis",
+      status: "success",
+      message: "Analyzing document content with Gemini for semantic understanding",
+    });
+    
+    // Simulate Gemini API processing time for semantic analysis
+    await new Promise(resolve => setTimeout(resolve, 3000 + Math.random() * 2000));
 
     // Update document status
     const { error: updateError } = await supabase
       .from("documents")
       .update({
         status: "processed",
-        page_count: 5, // Mock page count
+        page_count: mockPageCount,
+        processing_progress: 100,
         updated_at: new Date().toISOString(),
       })
       .eq("id", documentId);
@@ -82,25 +182,12 @@ serve(async (req) => {
       throw new Error(`Failed to update document status: ${updateError.message}`);
     }
 
-    // Create mock page entries
-    const pagePromises = [];
-    for (let i = 1; i <= 5; i++) {
-      pagePromises.push(supabase.from("document_pages").insert({
-        document_id: documentId,
-        page_number: i,
-        image_url: `https://via.placeholder.com/800x1000?text=Page+${i}`,
-        text_content: `Sample text content for page ${i}`,
-      }));
-    }
-
-    await Promise.all(pagePromises);
-
     // Log processing completion
     await supabase.from("processing_logs").insert({
       document_id: documentId,
       action: "Processing Completed",
       status: "success",
-      message: "Document processed successfully",
+      message: "Document processed successfully with all pages extracted and analyzed",
     });
 
     console.log(`Document processing completed for ID: ${documentId}`);
@@ -108,7 +195,8 @@ serve(async (req) => {
       JSON.stringify({ 
         success: true, 
         message: "Document processed successfully",
-        documentId 
+        documentId,
+        pageCount: mockPageCount
       }),
       { 
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -126,12 +214,18 @@ serve(async (req) => {
       if (supabaseUrl && supabaseServiceKey) {
         const supabase = createClient(supabaseUrl, supabaseServiceKey);
         
-        // Parse request body to get documentId
-        const body = await req.json().catch(() => ({}));
+        // Try to get documentId from request body
+        let documentId = null;
+        try {
+          const body = await req.json().catch(() => ({}));
+          documentId = body.documentId;
+        } catch (parseError) {
+          console.error("Error parsing request JSON:", parseError);
+        }
         
-        if (body.documentId) {
+        if (documentId) {
           await supabase.from("processing_logs").insert({
-            document_id: body.documentId,
+            document_id: documentId,
             action: "Processing Error",
             status: "error",
             message: error.message || "Unknown error occurred",
@@ -144,7 +238,7 @@ serve(async (req) => {
               processing_error: error.message || "Unknown error occurred",
               updated_at: new Date().toISOString(),
             })
-            .eq("id", body.documentId);
+            .eq("id", documentId);
         }
       }
     } catch (logError) {

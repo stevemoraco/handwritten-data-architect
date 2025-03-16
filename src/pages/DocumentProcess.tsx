@@ -1,3 +1,4 @@
+
 import * as React from "react";
 import { useNavigate } from "react-router-dom";
 import { DocumentUpload } from "@/components/document/DocumentUpload";
@@ -13,6 +14,17 @@ import { v4 as uuidv4 } from "uuid";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/context/AuthContext";
+
+// Mock page details for simulation
+const generateMockPages = (pageCount: number) => {
+  return Array.from({ length: pageCount }).map((_, i) => ({
+    pageNumber: i + 1,
+    status: "waiting" as const,
+    thumbnail: undefined,
+    text: undefined,
+    error: undefined
+  }));
+};
 
 export default function DocumentProcess() {
   const navigate = useNavigate();
@@ -60,6 +72,7 @@ export default function DocumentProcess() {
       fields: 0
     }
   });
+  const [documentDetails, setDocumentDetails] = React.useState<any[]>([]);
 
   React.useEffect(() => {
     if (!user && !user?.id) {
@@ -76,7 +89,6 @@ export default function DocumentProcess() {
     if (!documentIds.length) return;
     
     setUploadedDocumentIds(documentIds);
-    
     updateStepStatus("Document Upload", "completed");
     
     try {
@@ -95,6 +107,19 @@ export default function DocumentProcess() {
         processedDocuments: documentIds.length
       }));
       
+      // Create initial document details
+      const initialDocDetails = documents.map(doc => ({
+        id: doc.id,
+        name: doc.name,
+        pageCount: doc.page_count || 5, // Use actual page count or default to 5
+        processedPages: 0,
+        status: "waiting" as const,
+        pages: generateMockPages(doc.page_count || 5),
+        thumbnail: undefined,
+        error: undefined
+      }));
+      
+      setDocumentDetails(initialDocDetails);
       console.log("Documents uploaded successfully:", documents);
       
       setActiveTab("process");
@@ -118,6 +143,293 @@ export default function DocumentProcess() {
     );
   };
 
+  const updateDocumentStatus = (docId: string, status: "waiting" | "processing" | "completed" | "failed", processedPages?: number, error?: string) => {
+    setDocumentDetails(prev => 
+      prev.map(doc => 
+        doc.id === docId 
+          ? { 
+              ...doc, 
+              status, 
+              processedPages: processedPages !== undefined ? processedPages : doc.processedPages,
+              error
+            } 
+          : doc
+      )
+    );
+  };
+
+  const updatePageStatus = (docId: string, pageNumber: number, status: "waiting" | "processing" | "completed" | "failed", updates: Partial<{ thumbnail: string, text: string, error: string }> = {}) => {
+    setDocumentDetails(prev => 
+      prev.map(doc => 
+        doc.id === docId 
+          ? { 
+              ...doc, 
+              pages: doc.pages.map(page => 
+                page.pageNumber === pageNumber
+                  ? { ...page, status, ...updates }
+                  : page
+              )
+            } 
+          : doc
+      )
+    );
+  };
+
+  // Simulate document transcription process with realistic timing
+  const simulateDocumentTranscription = async () => {
+    updateStepStatus("Document Transcription", "in_progress", 0);
+    setProcessStats(prev => ({ ...prev, processedDocuments: 0 }));
+    
+    const totalDocs = documentDetails.length;
+    let processedDocs = 0;
+    let totalPages = 0;
+    let processedPages = 0;
+    
+    // Calculate total pages
+    documentDetails.forEach(doc => {
+      totalPages += doc.pageCount;
+    });
+    
+    // Process each document
+    for (const doc of documentDetails) {
+      console.log(`Starting transcription of document: ${doc.name}`);
+      updateDocumentStatus(doc.id, "processing", 0);
+      
+      // Process pages for this document
+      for (let i = 0; i < doc.pages.length; i++) {
+        const pageNumber = i + 1;
+        const page = doc.pages[i];
+        
+        // Update page to processing
+        updatePageStatus(doc.id, pageNumber, "processing");
+        
+        // Simulate processing time (2-4 seconds per page)
+        const processingTime = 2000 + Math.random() * 2000;
+        await new Promise(resolve => setTimeout(resolve, processingTime));
+        
+        // Generate a random thumbnail (placeholder)
+        const dummyThumbnail = `https://via.placeholder.com/800x1000?text=Page+${pageNumber}`;
+        
+        // Generate dummy text content
+        const dummyText = `This is extracted text from page ${pageNumber} of document ${doc.name}. The content appears to include several paragraphs of information that have been successfully extracted using OCR technology.`;
+        
+        // Randomly simulate a failure (5% chance)
+        const shouldFail = Math.random() < 0.05;
+        
+        if (shouldFail) {
+          updatePageStatus(doc.id, pageNumber, "failed", {
+            error: "OCR processing failed for this page"
+          });
+          console.log(`Failed to process page ${pageNumber} of document ${doc.id}`);
+        } else {
+          // Update page to completed with thumbnail and text
+          updatePageStatus(doc.id, pageNumber, "completed", {
+            thumbnail: dummyThumbnail,
+            text: dummyText
+          });
+          console.log(`Processed page ${pageNumber} of document ${doc.id}`);
+        }
+        
+        // Update document processed pages count
+        updateDocumentStatus(doc.id, "processing", i + 1);
+        
+        // Update global progress
+        processedPages++;
+        const transcriptionProgress = (processedPages / totalPages) * 100;
+        updateStepStatus("Document Transcription", "in_progress", transcriptionProgress);
+        
+        setProcessStats(prev => ({
+          ...prev,
+          processedDocuments: processedPages
+        }));
+      }
+      
+      // Mark document as completed
+      updateDocumentStatus(doc.id, "completed", doc.pageCount);
+      processedDocs++;
+      
+      console.log(`Completed transcription of document: ${doc.name}`);
+      
+      // Add document thumbnail (first page)
+      const firstPageWithThumbnail = doc.pages.find(p => p.status === "completed" && p.thumbnail);
+      if (firstPageWithThumbnail) {
+        setDocumentDetails(prev => 
+          prev.map(d => 
+            d.id === doc.id 
+              ? { ...d, thumbnail: firstPageWithThumbnail.thumbnail } 
+              : d
+          )
+        );
+      }
+    }
+    
+    updateStepStatus("Document Transcription", "completed");
+    console.log("Document transcription completed");
+    
+    // Move to schema generation next
+    simulateSchemaGeneration();
+  };
+
+  // Simulate schema generation process
+  const simulateSchemaGeneration = async () => {
+    updateStepStatus("Schema Generation", "in_progress", 0);
+    setProcessStats(prev => ({ ...prev, processedDocuments: 0 }));
+    
+    const totalDocs = documentDetails.length;
+    let processedDocs = 0;
+    
+    // Reset document statuses for schema generation
+    setDocumentDetails(prev => 
+      prev.map(doc => ({
+        ...doc,
+        status: "waiting"
+      }))
+    );
+    
+    // Process each document for schema generation
+    for (const doc of documentDetails) {
+      console.log(`Analyzing document for schema: ${doc.name}`);
+      updateDocumentStatus(doc.id, "processing");
+      
+      // Simulate processing time (3-6 seconds per document)
+      const processingTime = 3000 + Math.random() * 3000;
+      await new Promise(resolve => setTimeout(resolve, processingTime));
+      
+      // Mark document as completed
+      updateDocumentStatus(doc.id, "completed");
+      processedDocs++;
+      
+      // Update progress
+      const schemaProgress = (processedDocs / totalDocs) * 100;
+      updateStepStatus("Schema Generation", "in_progress", schemaProgress);
+      
+      setProcessStats(prev => ({
+        ...prev,
+        processedDocuments: processedDocs,
+        schemaDetails: {
+          tables: Math.min(10, prev.schemaDetails.tables + 1 + Math.floor(Math.random() * 2)),
+          fields: Math.min(50, prev.schemaDetails.fields + 5 + Math.floor(Math.random() * 10))
+        }
+      }));
+      
+      console.log(`Completed schema analysis for document: ${doc.name}`);
+    }
+    
+    updateStepStatus("Schema Generation", "completed");
+    console.log("Schema generation completed");
+    
+    // Create mock schema
+    const mockSchema: DocumentSchema = {
+      id: uuidv4(),
+      name: `Schema for ${totalDocs} document(s)`,
+      description: "Automatically generated schema based on document content",
+      rationale: "Basic document information schema with intelligent field mapping",
+      suggestions: [
+        "Consider adding a 'category' field to classify documents",
+        "Date formats should be standardized across all documents"
+      ],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      organizationId: user?.organizationId || '',
+      structure: [
+        {
+          id: uuidv4(),
+          name: "Document Information",
+          description: "Basic document metadata",
+          displayOrder: 1,
+          fields: [
+            {
+              id: uuidv4(),
+              name: "document_id",
+              description: "Unique document identifier",
+              type: "string",
+              required: true,
+              displayOrder: 1
+            },
+            {
+              id: uuidv4(),
+              name: "document_name",
+              description: "Document filename",
+              type: "string",
+              required: true,
+              displayOrder: 2
+            },
+            {
+              id: uuidv4(),
+              name: "upload_date",
+              description: "Date of upload",
+              type: "date",
+              required: true,
+              displayOrder: 3
+            },
+            {
+              id: uuidv4(),
+              name: "page_count",
+              description: "Number of pages",
+              type: "number",
+              required: false,
+              displayOrder: 4
+            }
+          ]
+        },
+        {
+          id: uuidv4(),
+          name: "Invoice Details",
+          description: "Invoice specific information",
+          displayOrder: 2,
+          fields: [
+            {
+              id: uuidv4(),
+              name: "invoice_number",
+              description: "Invoice reference number",
+              type: "string",
+              required: true,
+              displayOrder: 1
+            },
+            {
+              id: uuidv4(),
+              name: "issue_date",
+              description: "Date invoice was issued",
+              type: "date",
+              required: true,
+              displayOrder: 2
+            },
+            {
+              id: uuidv4(),
+              name: "due_date",
+              description: "Payment due date",
+              type: "date",
+              required: true,
+              displayOrder: 3
+            },
+            {
+              id: uuidv4(),
+              name: "total_amount",
+              description: "Total invoice amount",
+              type: "number",
+              required: true,
+              displayOrder: 4
+            },
+            {
+              id: uuidv4(),
+              name: "tax_amount",
+              description: "Tax amount",
+              type: "number",
+              required: false,
+              displayOrder: 5
+            }
+          ]
+        }
+      ]
+    };
+    
+    setGeneratedSchema(mockSchema);
+    
+    // Move to schema refinement
+    updateStepStatus("Schema Refinement", "in_progress");
+    setActiveTab("schema");
+  };
+
   const startProcessing = async () => {
     if (uploadedDocumentIds.length === 0) {
       toast({
@@ -129,154 +441,8 @@ export default function DocumentProcess() {
     }
     
     try {
-      updateStepStatus("Document Transcription", "in_progress", 0);
-      
-      const { data: documents, error: documentsError } = await supabase
-        .from("documents")
-        .select("*")
-        .in("id", uploadedDocumentIds);
-      
-      if (documentsError) {
-        throw new Error(`Failed to fetch documents: ${documentsError.message}`);
-      }
-      
-      if (!documents || documents.length === 0) {
-        throw new Error("No documents found with the provided IDs");
-      }
-      
-      for (let i = 0; i < documents.length; i++) {
-        const document = documents[i];
-        
-        const { data: pages, error: pagesError } = await supabase
-          .from("document_pages")
-          .select("*")
-          .eq("document_id", document.id)
-          .order("page_number", { ascending: true });
-        
-        if (pagesError) {
-          throw new Error(`Failed to fetch document pages: ${pagesError.message}`);
-        }
-        
-        if (!pages || pages.length === 0) {
-          try {
-            const { error: processingError } = await supabase.functions.invoke("process-document", {
-              body: { documentId: document.id }
-            });
-            
-            if (processingError) {
-              throw new Error(`Processing failed: ${processingError.message}`);
-            }
-            
-            const { data: updatedPages, error: refetchError } = await supabase
-              .from("document_pages")
-              .select("*")
-              .eq("document_id", document.id)
-              .order("page_number", { ascending: true });
-            
-            if (refetchError) {
-              throw new Error(`Failed to fetch updated pages: ${refetchError.message}`);
-            }
-            
-            if (!updatedPages || updatedPages.length === 0) {
-              throw new Error(`No pages generated for document ${document.id}`);
-            }
-            
-            console.log(`Generated ${updatedPages.length} pages for document ${document.id}`);
-          } catch (processingError) {
-            console.error(`Error processing document ${document.id}:`, processingError);
-            toast({
-              title: "Processing error",
-              description: `Failed to process document: ${processingError.message}`,
-              variant: "destructive"
-            });
-            
-            updateStepStatus("Document Transcription", "failed", undefined, processingError.message);
-            return;
-          }
-        }
-        
-        const progress = ((i + 1) / documents.length) * 100;
-        updateStepStatus("Document Transcription", "in_progress", progress);
-        
-        setProcessStats(prev => ({
-          ...prev,
-          processedDocuments: i + 1
-        }));
-      }
-      
-      updateStepStatus("Document Transcription", "completed");
-      
-      updateStepStatus("Schema Generation", "in_progress", 0);
-      setProcessStats(prev => ({ ...prev, processedDocuments: 0 }));
-      
-      const mockSchema: DocumentSchema = {
-        id: uuidv4(),
-        name: `Schema for ${documents.length} document(s)`,
-        description: "Automatically generated schema based on document content",
-        rationale: "Basic document information schema",
-        suggestions: [],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        organizationId: user?.organizationId || '',
-        structure: [
-          {
-            id: uuidv4(),
-            name: "Document Information",
-            description: "Basic document metadata",
-            displayOrder: 1,
-            fields: [
-              {
-                id: uuidv4(),
-                name: "document_id",
-                description: "Unique document identifier",
-                type: "string",
-                required: true,
-                displayOrder: 1
-              },
-              {
-                id: uuidv4(),
-                name: "document_name",
-                description: "Document filename",
-                type: "string",
-                required: true,
-                displayOrder: 2
-              },
-              {
-                id: uuidv4(),
-                name: "upload_date",
-                description: "Date of upload",
-                type: "date",
-                required: true,
-                displayOrder: 3
-              },
-              {
-                id: uuidv4(),
-                name: "page_count",
-                description: "Number of pages",
-                type: "number",
-                required: false,
-                displayOrder: 4
-              }
-            ]
-          }
-        ]
-      };
-      
-      setGeneratedSchema(mockSchema);
-      
-      updateStepStatus("Schema Generation", "completed");
-      updateStepStatus("Schema Refinement", "in_progress");
-      
-      setProcessStats(prev => ({
-        ...prev,
-        schemaDetails: {
-          tables: mockSchema.structure.length,
-          fields: mockSchema.structure.reduce((sum, table) => sum + (table.fields?.length || 0), 0)
-        }
-      }));
-      
-      setActiveTab("schema");
-      
+      // Start the realistic document processing simulation
+      simulateDocumentTranscription();
     } catch (error) {
       console.error("Error in document processing:", error);
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
@@ -348,6 +514,7 @@ export default function DocumentProcess() {
             documentCount={processStats.documentCount}
             processedDocuments={processStats.processedDocuments}
             schemaDetails={processStats.schemaDetails}
+            documentDetails={documentDetails}
           />
         </div>
         
