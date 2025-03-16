@@ -573,5 +573,114 @@ export function getExtractedData(documentId: string): Promise<DocumentData[]> {
   });
 }
 
-export
+export async function repairDocumentUrl(documentId: string): Promise<boolean> {
+  if (!documentId) return false;
 
+  try {
+    // Get the document
+    const { data: doc, error } = await supabase
+      .from("documents")
+      .select("id, name, type, user_id")
+      .eq("id", documentId)
+      .single();
+
+    if (error || !doc) {
+      console.error("Error fetching document for repair:", error);
+      return false;
+    }
+
+    // Generate the storage paths that could contain the document
+    const userId = doc.user_id;
+    const extension = doc.type === 'pdf' ? '.pdf' : '';
+    
+    // Path strategies
+    const idBasedPath = `${userId}/${doc.id}/original${extension}`;
+    const nameBasedPath = `${userId}/uploads/${encodeURIComponent(doc.name)}`;
+    
+    // Get URLs for both paths
+    const { data: idPathData } = await supabase.storage
+      .from("document_files")
+      .getPublicUrl(idBasedPath);
+      
+    const { data: namePathData } = await supabase.storage
+      .from("document_files")
+      .getPublicUrl(nameBasedPath);
+    
+    // Check which URLs are actually valid
+    const idUrl = idPathData?.publicUrl;
+    const nameUrl = namePathData?.publicUrl;
+    
+    // Use the first available URL
+    const url = idUrl || nameUrl;
+    
+    if (url) {
+      // Update the document with the working URL
+      const { error: updateError } = await supabase
+        .from("documents")
+        .update({
+          original_url: url,
+          url: url
+        })
+        .eq("id", documentId);
+        
+      if (updateError) {
+        console.error("Error updating document URL:", updateError);
+        return false;
+      }
+      
+      console.log(`Repaired URL for document ${documentId}: ${url}`);
+      return true;
+    }
+    
+    console.error(`Failed to find valid URL for document ${documentId}`);
+    return false;
+  } catch (error) {
+    console.error("Error in repairDocumentUrl:", error);
+    return false;
+  }
+}
+
+export async function batchRepairDocumentUrls(userId: string): Promise<{
+  total: number;
+  repaired: number;
+  failed: number;
+}> {
+  const result = {
+    total: 0,
+    repaired: 0,
+    failed: 0
+  };
+
+  try {
+    // Get all documents for the user that have missing or invalid URLs
+    const { data: docs, error } = await supabase
+      .from("documents")
+      .select("id")
+      .eq("user_id", userId)
+      .or("original_url.is.null,url.is.null");
+      
+    if (error) {
+      console.error("Error fetching documents for batch repair:", error);
+      return result;
+    }
+    
+    result.total = docs?.length || 0;
+    
+    // Process each document
+    if (docs && docs.length > 0) {
+      for (const doc of docs) {
+        const success = await repairDocumentUrl(doc.id);
+        if (success) {
+          result.repaired += 1;
+        } else {
+          result.failed += 1;
+        }
+      }
+    }
+    
+    return result;
+  } catch (error) {
+    console.error("Error in batchRepairDocumentUrls:", error);
+    return result;
+  }
+}
