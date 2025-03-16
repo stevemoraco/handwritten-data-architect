@@ -31,6 +31,7 @@ export default function Pipelines() {
       // Short timeout to ensure we show loading state
       await new Promise(resolve => setTimeout(resolve, 100));
       
+      // Use a more generic query approach since document_pipelines might not be in the types
       const { data, error } = await supabase
         .from('document_pipelines')
         .select('*')
@@ -42,7 +43,7 @@ export default function Pipelines() {
       }
 
       // Transform the database records to match the DocumentPipeline type
-      const pipelinesList: DocumentPipeline[] = data ? data.map(pipeline => ({
+      const pipelinesList: DocumentPipeline[] = data ? data.map((pipeline: any) => ({
         id: pipeline.id,
         name: pipeline.name,
         description: pipeline.description || "",
@@ -111,7 +112,7 @@ export default function Pipelines() {
                 <CardTitle className="text-xl flex justify-between items-center">
                   {pipeline.name}
                   <Badge variant={
-                    pipeline.status === 'completed' ? 'success' : 
+                    pipeline.status === 'completed' ? 'secondary' : 
                     pipeline.status === 'processing' ? 'secondary' : 
                     'default'
                   }>
