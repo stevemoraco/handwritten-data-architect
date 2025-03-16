@@ -74,7 +74,7 @@ serve(async (req) => {
     // For PDFs, we need to download the file, extract pages, and upload each page as an image
     console.log("Downloading the PDF file...");
     
-    // Build the path to the PDF file
+    // Build the path to the PDF file - always use original.pdf
     const pdfPath = `${userId}/${documentId}/original.pdf`;
     console.log(`PDF path: ${pdfPath}`);
     
@@ -91,7 +91,7 @@ serve(async (req) => {
       throw new Error("PDF file download returned no data");
     }
     
-    console.log("PDF file downloaded successfully, processing pages...");
+    console.log("PDF file downloaded successfully");
     
     // Update document status
     await supabase
@@ -101,10 +101,35 @@ serve(async (req) => {
       })
       .eq("id", documentId);
     
-    // Extract page count from PDF using a basic method
-    // In a real implementation, you would use a PDF processing library here
-    const pageCount = Math.max(1, Math.ceil(fileData.size / 100000));
-    console.log(`Estimated page count: ${pageCount}`);
+    // Use PDF metadata to get actual page count
+    // For now we'll use a simple approach but you could add a PDF parser library
+    // Read the first few kb of the PDF to find the /Count entry
+    const pdfText = new TextDecoder().decode(fileData.slice(0, Math.min(10000, fileData.size)));
+    
+    // Try to find the /Count entry which typically indicates page count
+    const countMatch = /\/Count\s+(\d+)/.exec(pdfText);
+    
+    // Default to 1 if we can't determine the count
+    let pageCount = 1;
+    
+    if (countMatch && countMatch[1]) {
+      pageCount = parseInt(countMatch[1], 10);
+      console.log(`Detected ${pageCount} pages from PDF metadata`);
+    } else {
+      // Fallback: count occurrences of "Page" or "/Page"
+      const pageMatches = pdfText.match(/\/Page\s*\//g);
+      if (pageMatches) {
+        pageCount = pageMatches.length;
+        console.log(`Estimated ${pageCount} pages from PDF structure`);
+      } else {
+        console.log("Could not determine page count, using default of 1");
+      }
+    }
+
+    // Make sure we have a reasonable value (at least 1, and not too large)
+    pageCount = Math.max(1, Math.min(pageCount, 1000));
+    
+    console.log(`Using page count: ${pageCount}`);
     
     // Update the document with the page count
     await supabase
@@ -115,8 +140,29 @@ serve(async (req) => {
       })
       .eq("id", documentId);
     
-    // Create a simple "processed" version of each page
-    // In a real implementation, you would convert PDF pages to images
+    // Clear any existing pages
+    const { error: deleteError } = await supabase
+      .from("document_pages")
+      .delete()
+      .eq("document_id", documentId);
+      
+    if (deleteError) {
+      console.error(`Error clearing existing pages: ${deleteError.message}`);
+    }
+    
+    // Generate a public URL for the original PDF that all pages will reference
+    const { data: urlData } = supabase.storage
+      .from("document_files")
+      .getPublicUrl(`${userId}/${documentId}/original.pdf`);
+      
+    if (!urlData || !urlData.publicUrl) {
+      throw new Error("Failed to generate public URL for the PDF");
+    }
+    
+    const pdfUrl = urlData.publicUrl;
+    console.log(`PDF public URL: ${pdfUrl}`);
+    
+    // Create a document page record for each page, pointing to the PDF with page parameter
     for (let i = 0; i < pageCount; i++) {
       const pageNumber = i + 1;
       
@@ -127,18 +173,13 @@ serve(async (req) => {
           processing_progress: 50 + Math.floor((i / pageCount) * 40)
         })
         .eq("id", documentId);
-
-      // Generate public URL for the original PDF
-      const { data: urlData } = supabase.storage
-        .from("document_files")
-        .getPublicUrl(`${userId}/${documentId}/original.pdf`);
       
-      // Create a document page record with the image URL pointing to the PDF
+      // Create a document page record with the image URL pointing to the PDF with page parameter
       await supabase.from("document_pages").insert({
         document_id: documentId,
         page_number: pageNumber,
-        image_url: urlData.publicUrl + `#page=${pageNumber}`, // Add page parameter for PDF viewer
-        text_content: `Content from page ${pageNumber}` // In a real implementation, this would contain extracted text
+        image_url: `${pdfUrl}#page=${pageNumber}`, // Add page parameter for PDF viewer
+        text_content: `Content from page ${pageNumber}` // Placeholder text content
       });
       
       console.log(`Created page ${pageNumber} record`);
