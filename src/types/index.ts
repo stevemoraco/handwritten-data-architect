@@ -41,7 +41,7 @@ export interface Document {
   userId: string;
   organizationId?: string;
   pipelineId?: string;
-  error?: string; // Add error property used in DocumentSelector
+  error?: string;
 }
 
 export interface DocumentSchema {
@@ -98,7 +98,7 @@ export interface ProcessingLog {
   id: string;
   document_id: string;
   action: string;
-  status: "success" | "error" | "warning";  // Added "warning" status to match what might come from API
+  status: "success" | "error" | "warning";
   message?: string;
   created_at: string;
 }

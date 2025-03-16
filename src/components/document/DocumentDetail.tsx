@@ -1,3 +1,4 @@
+
 import * as React from "react";
 import { Document, ProcessingLog } from "@/types";
 import { Button } from "@/components/ui/button";
@@ -17,7 +18,6 @@ interface DocumentDetailProps {
 }
 
 export function DocumentDetail({ document, onProcess, logs = [] }: DocumentDetailProps) {
-  const [activeTab, setActiveTab] = React.useState("preview");
   const [isCheckingFile, setIsCheckingFile] = React.useState(false);
   const [fileUrl, setFileUrl] = React.useState<string | null>(null);
 
@@ -29,22 +29,13 @@ export function DocumentDetail({ document, onProcess, logs = [] }: DocumentDetai
 
   const fetchDocumentUrl = async () => {
     try {
+      // First try using original_url if available
       if (document.original_url) {
-        const response = await fetch(document.original_url, { method: 'HEAD' });
-        if (response.ok) {
-          setFileUrl(document.original_url);
-          return;
-        }
+        setFileUrl(document.original_url);
+        return;
       }
       
-      if (document.url && document.url !== document.original_url) {
-        const response = await fetch(document.url, { method: 'HEAD' });
-        if (response.ok) {
-          setFileUrl(document.url);
-          return;
-        }
-      }
-      
+      // If not available, try direct storage path
       if (document.userId) {
         const pathWithId = `${document.userId}/${document.id}/original${document.type === 'pdf' ? '.pdf' : ''}`;
         const { data: urlWithId } = supabase.storage
@@ -52,23 +43,11 @@ export function DocumentDetail({ document, onProcess, logs = [] }: DocumentDetai
           .getPublicUrl(pathWithId);
           
         if (urlWithId?.publicUrl) {
-          try {
-            const response = await fetch(urlWithId.publicUrl, { method: 'HEAD' });
-            if (response.ok) {
-              setFileUrl(urlWithId.publicUrl);
-              
-              await supabase
-                .from("documents")
-                .update({ original_url: urlWithId.publicUrl })
-                .eq("id", document.id);
-                
-              return;
-            }
-          } catch (error) {
-            console.error("Error checking reconstructed URL:", error);
-          }
+          setFileUrl(urlWithId.publicUrl);
+          return;
         }
         
+        // Try with uploads path as fallback
         const filename = encodeURIComponent(document.name);
         const pathWithName = `${document.userId}/uploads/${filename}`;
         const { data: urlWithName } = supabase.storage
@@ -76,21 +55,8 @@ export function DocumentDetail({ document, onProcess, logs = [] }: DocumentDetai
           .getPublicUrl(pathWithName);
           
         if (urlWithName?.publicUrl) {
-          try {
-            const response = await fetch(urlWithName.publicUrl, { method: 'HEAD' });
-            if (response.ok) {
-              setFileUrl(urlWithName.publicUrl);
-              
-              await supabase
-                .from("documents")
-                .update({ original_url: urlWithName.publicUrl })
-                .eq("id", document.id);
-                
-              return;
-            }
-          } catch (error) {
-            console.error("Error checking alternative URL:", error);
-          }
+          setFileUrl(urlWithName.publicUrl);
+          return;
         }
       }
       
