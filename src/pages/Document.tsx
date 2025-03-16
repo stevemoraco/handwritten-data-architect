@@ -15,18 +15,46 @@ export default function Document() {
   const { documents, fetchUserDocuments, isLoading } = useDocuments();
   const [logs, setLogs] = React.useState<ProcessingLog[]>([]);
   const [logsLoading, setLogsLoading] = React.useState(true);
+  const [documentLoaded, setDocumentLoaded] = React.useState(false);
 
   const document = React.useMemo(() => {
     return documents.find(doc => doc.id === documentId);
   }, [documents, documentId]);
 
   React.useEffect(() => {
-    fetchUserDocuments();
+    const loadDocumentData = async () => {
+      try {
+        if (!documentId) return;
+        
+        // Set a maximum timeout for loading documents
+        const timeout = setTimeout(() => {
+          if (!documentLoaded) {
+            setIsLoading(false);
+            toast({
+              title: "Loading timeout",
+              description: "Document loading took too long. Please refresh to try again.",
+              variant: "destructive"
+            });
+          }
+        }, 10000); // 10 second timeout
+        
+        await fetchUserDocuments();
+        setDocumentLoaded(true);
+        
+        await fetchLogs(documentId);
+        clearTimeout(timeout);
+      } catch (error) {
+        console.error("Error loading document data:", error);
+        toast({
+          title: "Error",
+          description: "Failed to load document data",
+          variant: "destructive"
+        });
+      }
+    };
     
-    if (documentId) {
-      fetchLogs(documentId);
-    }
-  }, [documentId, fetchUserDocuments]);
+    loadDocumentData();
+  }, [documentId]);
 
   const fetchLogs = async (docId: string) => {
     setLogsLoading(true);
@@ -49,7 +77,24 @@ export default function Document() {
     navigate("/documents");
   };
 
-  if (isLoading) {
+  // Custom loading state - prevent infinite loading
+  const [isLoadingInternal, setIsLoading] = React.useState(true);
+  
+  React.useEffect(() => {
+    // Set timeout to prevent infinite loading
+    const timeout = setTimeout(() => {
+      setIsLoading(false);
+    }, 5000); // 5 second max loading time
+    
+    if (!isLoading && document) {
+      setIsLoading(false);
+      clearTimeout(timeout);
+    }
+    
+    return () => clearTimeout(timeout);
+  }, [isLoading, document]);
+
+  if (isLoadingInternal) {
     return (
       <div className="container py-10 flex items-center justify-center">
         <div className="text-center">
