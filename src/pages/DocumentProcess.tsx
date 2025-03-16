@@ -29,7 +29,8 @@ import {
   extractDocumentData
 } from "@/services/documentService";
 
-const generateMockPages = (pageCount: number) => {
+const generateRealisticPages = (doc: any) => {
+  const pageCount = doc.page_count || Math.max(1, Math.ceil(doc.size / 50000));
   return Array.from({ length: pageCount }).map((_, i) => ({
     pageNumber: i + 1,
     status: "waiting" as const,
@@ -235,7 +236,7 @@ export default function DocumentProcess() {
         pageCount: doc.page_count || 0,
         processedPages: 0,
         status: doc.status || "waiting",
-        pages: generateMockPages(doc.page_count || 0),
+        pages: generateRealisticPages(doc),
         thumbnail: undefined,
         error: doc.processing_error
       }));
@@ -402,64 +403,75 @@ export default function DocumentProcess() {
         updateDocumentStatus(doc.id, "processing");
       }
       
-      const schemaResult = await generateSchema(uploadedDocumentIds);
+      console.log("Sending documents to schema generation:", {
+        documentIds: uploadedDocumentIds,
+        documentDetails: documentDetails.map(d => ({ id: d.id, name: d.name, pageCount: d.pageCount }))
+      });
       
-      if (!schemaResult) {
-        throw new Error("Schema generation failed");
-      }
-      
-      let schema;
       try {
-        if (typeof schemaResult === 'string') {
-          schema = JSON.parse(schemaResult);
-        } else {
-          schema = schemaResult;
+        const schemaResult = await generateSchema(uploadedDocumentIds);
+        
+        if (!schemaResult) {
+          throw new Error("Schema generation failed - no result returned");
         }
-      } catch (error) {
-        console.error("Error parsing schema:", error);
-        throw new Error("Invalid schema format received");
-      }
-      
-      const documentSchema: DocumentSchema = {
-        id: uuidv4(),
-        name: schema.schema.name || `Schema for ${documentDetails.length} document(s)`,
-        description: schema.schema.description || "Automatically generated schema",
-        structure: schema.schema.tables.map((table: any, tableIndex: number) => ({
+        
+        let schema;
+        try {
+          if (typeof schemaResult === 'string') {
+            schema = JSON.parse(schemaResult);
+          } else {
+            schema = schemaResult;
+          }
+          console.log("Parsed schema:", schema);
+        } catch (error) {
+          console.error("Error parsing schema:", error);
+          throw new Error("Invalid schema format received");
+        }
+        
+        const documentSchema: DocumentSchema = {
           id: uuidv4(),
-          name: table.name,
-          description: table.description || "",
-          displayOrder: tableIndex + 1,
-          fields: table.fields.map((field: any, fieldIndex: number) => ({
+          name: schema.schema?.name || `Schema for ${documentDetails.length} document(s)`,
+          description: schema.schema?.description || "Automatically generated schema",
+          structure: (schema.schema?.tables || []).map((table: any, tableIndex: number) => ({
             id: uuidv4(),
-            name: field.name,
-            description: field.description || "",
-            type: field.type || "string",
-            required: field.required || false,
-            enumValues: field.enumValues,
-            displayOrder: fieldIndex + 1
-          }))
-        })),
-        rationale: schema.schema.rationale || "",
-        suggestions: schema.schema.suggestions.map((suggestion: any) => ({
-          id: uuidv4(),
-          description: suggestion.description,
-          type: suggestion.type as "add" | "modify" | "remove",
-          impact: suggestion.impact
-        })),
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        organizationId: user?.id || ""
-      };
-      
-      setGeneratedSchema(documentSchema);
-      
-      setProcessStats(prev => ({
-        ...prev,
-        schemaDetails: {
-          tables: documentSchema.structure.length,
-          fields: documentSchema.structure.reduce((count, table) => count + table.fields.length, 0)
-        }
-      }));
+            name: table.name,
+            description: table.description || "",
+            displayOrder: tableIndex + 1,
+            fields: (table.fields || []).map((field: any, fieldIndex: number) => ({
+              id: uuidv4(),
+              name: field.name,
+              description: field.description || "",
+              type: field.type || "string",
+              required: field.required || false,
+              enumValues: field.enumValues,
+              displayOrder: fieldIndex + 1
+            }))
+          })),
+          rationale: schema.schema?.rationale || "",
+          suggestions: (schema.schema?.suggestions || []).map((suggestion: any) => ({
+            id: uuidv4(),
+            description: suggestion.description,
+            type: suggestion.type as "add" | "modify" | "remove",
+            impact: suggestion.impact
+          })),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          organizationId: user?.id || ""
+        };
+        
+        setGeneratedSchema(documentSchema);
+        
+        setProcessStats(prev => ({
+          ...prev,
+          schemaDetails: {
+            tables: documentSchema.structure.length,
+            fields: documentSchema.structure.reduce((count, table) => count + table.fields.length, 0)
+          }
+        }));
+      } catch (error) {
+        console.error("Schema generation error:", error);
+        throw error;
+      }
       
       for (const doc of documentDetails) {
         updateDocumentStatus(doc.id, "completed");
@@ -468,8 +480,24 @@ export default function DocumentProcess() {
       updateStepStatus("Schema Generation", "completed");
       console.log("Schema generation completed");
       
-      await prepareSchemaRefinement(documentSchema);
-      
+      if (generatedSchema) {
+        await prepareSchemaRefinement(generatedSchema);
+      } else {
+        const defaultSchema: DocumentSchema = {
+          id: uuidv4(),
+          name: `Schema for ${documentDetails.length} document(s)`,
+          description: "Basic generated schema",
+          structure: [],
+          rationale: "Basic schema due to generation limitations",
+          suggestions: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          organizationId: user?.id || ""
+        };
+        setGeneratedSchema(defaultSchema);
+        updateStepStatus("Schema Refinement", "in_progress", 50);
+        setActiveTab("schema");
+      }
     } catch (error) {
       console.error("Error in generateDocumentSchema:", error);
       updateStepStatus("Schema Generation", "failed", undefined, error instanceof Error ? error.message : "Unknown error");

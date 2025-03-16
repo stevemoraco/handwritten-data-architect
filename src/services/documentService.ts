@@ -159,10 +159,13 @@ export async function uploadDocument(
           body: { documentId: id, userId }
         });
 
-        if (!response.data.success) {
-          throw new Error(response.data.error || "Unknown error in PDF conversion");
+        if (!response.data || !response.data.success) {
+          throw new Error(response.data?.error || "Unknown error in PDF conversion");
         }
 
+        // Make sure we're using the actual page count from the PDF processor
+        const actualPageCount = response.data.pageCount || 0;
+        
         // Update progress with page information
         if (setProgress && uploadId) {
           setProgress({
@@ -170,9 +173,9 @@ export async function uploadDocument(
             fileName: filename,
             progress: 90,
             status: 'processing',
-            message: `Processed ${response.data.pageCount} pages`,
-            pageCount: response.data.pageCount,
-            pagesProcessed: response.data.pageCount
+            message: `Processed ${actualPageCount} pages`,
+            pageCount: actualPageCount,
+            pagesProcessed: actualPageCount
           });
         }
       } catch (error) {
@@ -363,6 +366,8 @@ export async function generateSchema(documentIds: string[]): Promise<any | null>
   if (!documentIds || documentIds.length === 0) return null;
 
   try {
+    console.log("Calling process-document edge function with documentIds:", documentIds);
+    
     // Call the process-document edge function with the generateSchema operation
     const response = await supabase.functions.invoke('process-document', {
       body: { 
@@ -372,14 +377,23 @@ export async function generateSchema(documentIds: string[]): Promise<any | null>
       }
     });
 
+    console.log("Schema generation response:", response);
+    
+    if (!response.data) {
+      console.error("No response data received from schema generation");
+      throw new Error("No response received from schema generation function");
+    }
+    
     if (!response.data.success) {
-      throw new Error(response.data.error || "Unknown error in schema generation");
+      const errorMsg = response.data.error || "Unknown error in schema generation";
+      console.error("Schema generation error:", errorMsg);
+      throw new Error(errorMsg);
     }
 
     return response.data.result || null;
   } catch (error) {
     console.error("Error in generateSchema:", error);
-    return null;
+    throw error; // Re-throw to allow proper error handling upstream
   }
 }
 
