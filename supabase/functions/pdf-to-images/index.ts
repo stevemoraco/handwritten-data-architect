@@ -2,329 +2,178 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.8.0";
 import * as pdfjs from "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/+esm";
 
-// Set worker source for PDF.js
-const pdfjsWorker = await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.mjs");
-globalThis.pdfjsWorker = pdfjsWorker;
-
-// CORS headers for browser requests
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-  "Content-Type": "application/json",
-};
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+}
+
+pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/+esm';
 
 serve(async (req) => {
-  // Handle CORS preflight requests
+  // Handle CORS requests
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders, status: 204 });
+    return new Response('ok', { headers: corsHeaders })
   }
 
   try {
-    // Parse request body
-    const { documentId, userId } = await req.json();
-    
+    // Get Supabase client
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+    if (!supabaseUrl || !supabaseKey) {
+      throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY env variables')
+    }
+    const supabase = createClient(supabaseUrl, supabaseKey, {
+      auth: {
+        persistSession: false
+      }
+    })
+
+    // Get documentId and userId from request body
+    const { documentId, userId } = await req.json()
     if (!documentId || !userId) {
-      return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: "Missing documentId or userId parameter" 
-        }),
-        { headers: corsHeaders, status: 400 }
-      );
+      throw new Error('Missing documentId or userId in request body')
     }
-    
-    console.log(`Processing PDF for document: ${documentId}, user: ${userId}`);
-    
-    // Create Supabase client
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL") || "",
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || ""
-    );
-    
-    // Log processing start
-    await supabase.from("processing_logs").insert({
-      document_id: documentId,
-      action: "PDF Processing Started",
-      status: "success",
-      message: "Starting PDF to image conversion"
-    });
 
-    // Update document status to processing
-    await supabase
-      .from("documents")
-      .update({
-        status: "processing",
-        processing_progress: 10
-      })
-      .eq("id", documentId);
+    // Process the PDF
+    const { pageCount, thumbnails } = await processPdf(supabase, userId, documentId);
 
-    // Get the document data
-    const { data: document, error: documentError } = await supabase
-      .from("documents")
-      .select("*")
-      .eq("id", documentId)
-      .single();
+    return new Response(
+      JSON.stringify({ success: true, pageCount, thumbnails }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  } catch (error) {
+    console.error('Error processing PDF:', error)
+    return new Response(
+      JSON.stringify({ success: false, error: error.message }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+    )
+  }
+})
+
+async function processPdf(supabase, userId, documentId) {
+  try {
+    console.log(`Processing PDF for document: ${documentId}`);
     
-    if (documentError) {
-      throw new Error(`Failed to fetch document: ${documentError.message}`);
-    }
-    
-    if (!document) {
-      throw new Error("Document not found");
-    }
+    // Initialize variables
+    const thumbnails = [];
+    let pageCount = 0;
     
     console.log("Downloading the PDF file...");
     
-    // Get the file path from the document URL
-    // This is critical - we need to extract the path from the URL that works
-    let pdfUrl = document.original_url || document.url;
+    // Get document record to access the URL
+    const { data: document, error: docError } = await supabase
+      .from("documents")
+      .select("original_url, url, name")
+      .eq("id", documentId)
+      .single();
+      
+    if (docError || !document) {
+      throw new Error(`Failed to get document: ${docError?.message || "Document not found"}`);
+    }
+    
+    // Get the PDF URL directly from the document record
+    const pdfUrl = document.original_url || document.url;
     if (!pdfUrl) {
       throw new Error("No document URL available");
     }
     
     console.log(`Document URL: ${pdfUrl}`);
     
-    // Extract the path from the URL
-    // Format is like: https://...supabase.co/storage/v1/object/public/document_files/userId/temp/docId/filename.pdf
-    let pathParts = pdfUrl.split('document_files/')[1];
-    if (!pathParts) {
-      throw new Error("Invalid document URL format");
+    // For Supabase storage, extract the path from the URL
+    // The URL format is: https://{projectId}.supabase.co/storage/v1/object/public/document_files/{path}
+    const pathMatch = pdfUrl.match(/document_files\/(.+)$/);
+    if (!pathMatch || !pathMatch[1]) {
+      throw new Error(`Invalid document URL format: ${pdfUrl}`);
     }
     
-    const pdfPath = pathParts;
+    const pdfPath = decodeURIComponent(pathMatch[1]);
     console.log(`Extracted PDF path: ${pdfPath}`);
     
     // Download the PDF file
     const { data: fileData, error: downloadError } = await supabase.storage
       .from("document_files")
       .download(pdfPath);
-    
+
     if (downloadError) {
-      throw new Error(`Failed to download PDF file: ${downloadError.message}`);
+      throw new Error(`Failed to download PDF: ${downloadError.message}`);
     }
-    
+
     if (!fileData) {
-      throw new Error("PDF file download returned no data");
+      throw new Error("PDF file data is null");
     }
-    
-    console.log("PDF file downloaded successfully, processing with PDF.js");
-    
-    // Update progress
-    await supabase
-      .from("documents")
-      .update({
-        processing_progress: 30
-      })
-      .eq("id", documentId);
-    
-    // Convert ArrayBuffer to Uint8Array for PDF.js
-    const pdfData = new Uint8Array(await fileData.arrayBuffer());
-    
-    // Load the PDF document using PDF.js
-    console.log("Loading PDF with PDF.js...");
-    const loadingTask = pdfjs.getDocument({ data: pdfData });
-    const pdfDocument = await loadingTask.promise;
-    
-    // Get the actual page count from the PDF
-    const pageCount = pdfDocument.numPages;
-    console.log(`PDF loaded successfully. Page count: ${pageCount}`);
-    
-    // Update the document with the page count
-    await supabase
+
+    console.log("PDF file downloaded successfully.");
+
+    // Load the PDF document
+    console.log("Loading the PDF document...");
+    const pdf = await pdfjs.getDocument({ data: await fileData.arrayBuffer() }).promise;
+    pageCount = pdf.numPages;
+    console.log(`PDF loaded with ${pageCount} pages.`);
+
+    // Generate thumbnails for each page
+    console.log("Generating thumbnails...");
+    for (let i = 1; i <= pageCount; i++) {
+      try {
+        const page = await pdf.getPage(i);
+        const viewport = page.getViewport({ scale: 0.2 });
+        const canvas = document.createElement("canvas");
+        const context = canvas.getContext("2d");
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+
+        await page.render({
+          canvasContext: context,
+          viewport,
+        }).promise;
+
+        const dataUrl = canvas.toDataURL("image/jpeg");
+        thumbnails.push(dataUrl);
+        console.log(`Thumbnail generated for page ${i}`);
+      } catch (thumbnailError) {
+        console.error(`Error generating thumbnail for page ${i}:`, thumbnailError);
+        // Continue with the next page, but log the error
+      }
+    }
+
+    console.log("Thumbnails generated successfully.");
+
+    // Update the document in the database with thumbnails and page count
+    console.log("Updating document in database...");
+    const { error: updateError } = await supabase
       .from("documents")
       .update({
         page_count: pageCount,
-        processing_progress: 40
+        thumbnails: thumbnails,
+        status: 'processed'
       })
       .eq("id", documentId);
-    
-    // Clear any existing pages
-    console.log("Clearing any existing pages...");
-    const { error: deleteError } = await supabase
-      .from("document_pages")
-      .delete()
-      .eq("document_id", documentId);
-    
-    if (deleteError) {
-      console.error(`Error clearing existing pages: ${deleteError.message}`);
+
+    if (updateError) {
+      throw new Error(`Failed to update document: ${updateError.message}`);
     }
-    
-    // Create a storage folder for the page images
-    const imagesFolder = `${userId}/${documentId}/pages`;
-    
-    console.log(`Processing ${pageCount} pages and creating images...`);
-    
-    // Process each page
-    for (let i = 0; i < pageCount; i++) {
-      const pageNumber = i + 1;
-      const progressPercent = 40 + Math.floor((i / pageCount) * 50);
-      
-      // Update progress
-      await supabase
-        .from("documents")
-        .update({
-          processing_progress: progressPercent
-        })
-        .eq("id", documentId);
-      
-      try {
-        console.log(`Rendering page ${pageNumber}...`);
-        
-        // Get the page
-        const page = await pdfDocument.getPage(pageNumber);
-        
-        // Set rendering parameters
-        const viewport = page.getViewport({ scale: 1.5 });
-        const canvas = new OffscreenCanvas(viewport.width, viewport.height);
-        const context = canvas.getContext('2d');
-        
-        // Render the page to canvas
-        const renderContext = {
-          canvasContext: context,
-          viewport: viewport
-        };
-        
-        await page.render(renderContext).promise;
-        
-        // Convert canvas to blob
-        const imageBlob = await canvas.convertToBlob({ 
-          type: 'image/jpeg',
-          quality: 0.8
-        });
-        
-        // Convert Blob to ArrayBuffer for Supabase storage
-        const imageArrayBuffer = await imageBlob.arrayBuffer();
-        
-        // Upload the image to storage
-        const imagePath = `${imagesFolder}/page-${pageNumber}.jpg`;
-        const { error: uploadError } = await supabase.storage
-          .from("document_files")
-          .upload(imagePath, imageArrayBuffer, {
-            contentType: 'image/jpeg',
-            cacheControl: '3600'
-          });
-        
-        if (uploadError) {
-          console.error(`Error uploading page ${pageNumber} image:`, uploadError);
-          throw uploadError;
-        }
-        
-        // Get public URL for the image
-        const { data: urlData } = supabase.storage
-          .from("document_files")
-          .getPublicUrl(imagePath);
-        
-        if (!urlData || !urlData.publicUrl) {
-          throw new Error(`Failed to get public URL for page ${pageNumber}`);
-        }
-        
-        // Extract text content from the page (if available)
-        let textContent = "";
-        try {
-          const textContent = await page.getTextContent();
-          const textItems = textContent.items;
-          const pageText = textItems
-            .map(item => 'str' in item ? item.str : '')
-            .join(' ');
-            
-          textContent = pageText;
-        } catch (textError) {
-          console.warn(`Could not extract text from page ${pageNumber}:`, textError);
-          textContent = `Text extraction not available for page ${pageNumber}`;
-        }
-        
-        // Create document page record
-        await supabase.from("document_pages").insert({
-          document_id: documentId,
-          page_number: pageNumber,
-          image_url: urlData.publicUrl,
-          text_content: textContent
-        });
-        
-        console.log(`Successfully processed page ${pageNumber}`);
-      } catch (pageError) {
-        console.error(`Error processing page ${pageNumber}:`, pageError);
-        
-        // Log the error but continue processing other pages
-        await supabase.from("processing_logs").insert({
-          document_id: documentId,
-          action: `Page ${pageNumber} Processing Error`,
-          status: "error",
-          message: pageError instanceof Error ? pageError.message : "Unknown error"
-        });
-      }
-    }
-    
-    // Update document status to processed
-    await supabase
-      .from("documents")
-      .update({
-        status: "processed",
-        processing_progress: 100
-      })
-      .eq("id", documentId);
-    
-    // Log completion
+
+    console.log("Document updated successfully.");
+
+    return { pageCount, thumbnails };
+  }
+  catch (error) {
+    console.error("Error in processPdf:", error);
+
+    // Log the error to the database
     await supabase.from("processing_logs").insert({
       document_id: documentId,
-      action: "PDF Processing Completed",
-      status: "success",
-      message: `Processed ${pageCount} pages successfully`
+      action: "PDF Conversion",
+      status: "error",
+      message: error.message
     });
-    
-    console.log("PDF processing complete");
-    
-    return new Response(
-      JSON.stringify({
-        success: true,
-        pageCount: pageCount,
-        message: `PDF processing completed successfully. Extracted ${pageCount} pages.`
-      }),
-      { headers: corsHeaders, status: 200 }
-    );
-    
-  } catch (error) {
-    console.error("Error processing PDF:", error);
-    
-    try {
-      // Parse request body to get documentId
-      const { documentId } = await req.json();
-      
-      if (documentId) {
-        // Create Supabase client
-        const supabase = createClient(
-          Deno.env.get("SUPABASE_URL") || "",
-          Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || ""
-        );
-        
-        // Update document status to failed
-        await supabase
-          .from("documents")
-          .update({
-            status: "failed",
-            processing_error: error instanceof Error ? error.message : "Unknown error occurred"
-          })
-          .eq("id", documentId);
-        
-        // Log the error
-        await supabase.from("processing_logs").insert({
-          document_id: documentId,
-          action: "PDF Processing Failed",
-          status: "error",
-          message: error instanceof Error ? error.message : "Unknown error occurred"
-        });
-      }
-    } catch (logError) {
-      console.error("Failed to log error:", logError);
-    }
-    
-    return new Response(
-      JSON.stringify({
-        success: false,
-        error: error instanceof Error ? error.message : "Unknown error occurred"
-      }),
-      { headers: corsHeaders, status: 500 }
-    );
+
+    // Update the document status to failed
+    await supabase.from("documents").update({
+      status: "failed",
+      processing_error: error.message
+    }).eq("id", documentId);
+
+    throw error;
   }
-});
+}

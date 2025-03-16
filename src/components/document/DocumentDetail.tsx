@@ -24,16 +24,26 @@ export function DocumentDetail({ document, onProcess, logs = [] }: DocumentDetai
     try {
       setIsCheckingFile(true);
       
-      // Check URL availability and prioritize original_url
-      let documentUrl = document.original_url || document.url;
+      // Extract the URL to use - logging it to help debug
+      console.log("Document original_url:", document.original_url);
+      console.log("Document url:", document.url);
       
-      if (documentUrl) {
-        // Log the URL to help debug
-        console.log("Opening document URL:", documentUrl);
-        window.open(documentUrl, "_blank");
-      } else {
-        throw new Error("No document URL available");
+      // Try to find a working URL - prioritize original_url
+      let documentUrl = document.original_url;
+      
+      // Check if the URL is properly formatted - if not, fall back to url
+      if (!documentUrl || !documentUrl.includes('document_files')) {
+        console.log("Using document.url as fallback");
+        documentUrl = document.url;
       }
+      
+      // Final check
+      if (!documentUrl) {
+        throw new Error("No valid document URL available");
+      }
+      
+      console.log("Opening document URL:", documentUrl);
+      window.open(documentUrl, "_blank");
     } catch (error) {
       console.error("Error opening document:", error);
       toast({

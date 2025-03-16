@@ -1,4 +1,3 @@
-
 import { v4 as uuidv4 } from "uuid";
 import { supabase } from "@/integrations/supabase/client";
 import { Document, DocumentData, ProcessingLog, UploadProgress } from "@/types";
@@ -91,9 +90,9 @@ export async function uploadDocument(
       });
     }
 
-    // IMPORTANT: Use a temporary folder structure for initial upload
-    // This is the path that actually works based on the successful URL pattern
-    const uploadPath = `${userId}/temp/${id.substring(0, 10)}/${filename}`;
+    // Use a consistent path strategy that works across both upload and retrieval
+    // Format: userId/documentId/originalFilename
+    const uploadPath = `${userId}/${id}/${encodeURIComponent(filename)}`;
     
     console.log(`Uploading file to path: ${uploadPath}`);
       
@@ -126,12 +125,12 @@ export async function uploadDocument(
       .from("document_files")
       .getPublicUrl(uploadPath);
 
-    // Update document with URL
+    // Update document with URL - CRITICAL to store the actual working URL
     const { error: updateError } = await supabase
       .from("documents")
       .update({
         original_url: publicUrlData.publicUrl,
-        url: publicUrlData.publicUrl, // Ensure both URL fields match
+        url: publicUrlData.publicUrl, // Store the same URL in both fields
         status: "processing"
       })
       .eq("id", id);
