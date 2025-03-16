@@ -113,7 +113,7 @@ serve(async (req) => {
     
     console.log(`Converted ${pages.length} pages`);
     
-    // Update progress
+    // Update document with page count immediately
     await supabase
       .from("documents")
       .update({ 
@@ -122,7 +122,7 @@ serve(async (req) => {
       })
       .eq("id", documentId);
     
-    // Process each page
+    // Process each page one at a time
     const thumbnails = [];
     
     for (let i = 0; i < pages.length; i++) {
@@ -136,6 +136,24 @@ serve(async (req) => {
       
       console.log(`Processing page ${pageNumber}/${pages.length}`);
       
+      // Update processing progress to show which page we're on
+      await supabase
+        .from("processing_logs")
+        .insert({
+          document_id: documentId,
+          action: "Page Processing",
+          status: "success",
+          message: `Processing page ${pageNumber} of ${pages.length}`
+        });
+      
+      await supabase
+        .from("documents")
+        .update({ 
+          processing_progress: 40 + Math.floor((i / pages.length) * 50),
+          processing_error: null
+        })
+        .eq("id", documentId);
+      
       // Convert base64 string to a file
       const base64Data = jpgData.toString("base64");
       const byteCharacters = atob(base64Data);
@@ -146,53 +164,70 @@ serve(async (req) => {
       const byteArray = new Uint8Array(byteNumbers);
       const blob = new Blob([byteArray], { type: "image/jpeg" });
       
-      // Upload the page image to storage
-      const filePath = `${userId}/${documentId}/page_${pageNumber}.jpg`;
-      const { data: uploadData, error: uploadError } = await supabase
-        .storage
-        .from("document_files")
-        .upload(filePath, blob, {
-          contentType: "image/jpeg",
-          upsert: true,
-        });
-      
-      if (uploadError) {
-        console.error(`Error uploading page ${pageNumber}:`, uploadError);
-        continue;
-      }
-      
-      // Get the public URL for the image
-      const { data: publicUrlData } = await supabase
-        .storage
-        .from("document_files")
-        .getPublicUrl(filePath);
-      
-      if (publicUrlData && publicUrlData.publicUrl) {
-        thumbnails.push(publicUrlData.publicUrl);
-        
-        // Create or update the document page record
-        const { error: pageError } = await supabase
-          .from("document_pages")
-          .upsert({
-            document_id: documentId,
-            page_number: pageNumber,
-            image_url: publicUrlData.publicUrl,
-          }, {
-            onConflict: "document_id,page_number",
-            ignoreDuplicates: false,
+      try {
+        // Upload the page image to storage
+        const filePath = `${userId}/${documentId}/page_${pageNumber}.jpg`;
+        const { data: uploadData, error: uploadError } = await supabase
+          .storage
+          .from("document_files")
+          .upload(filePath, blob, {
+            contentType: "image/jpeg",
+            upsert: true,
           });
         
-        if (pageError) {
-          console.error(`Error saving page ${pageNumber} record:`, pageError);
+        if (uploadError) {
+          console.error(`Error uploading page ${pageNumber}:`, uploadError);
+          await supabase.from("processing_logs").insert({
+            document_id: documentId,
+            action: "Page Upload Error",
+            status: "error",
+            message: `Failed to upload page ${pageNumber}: ${uploadError.message}`
+          });
+          continue;
         }
+        
+        // Get the public URL for the image
+        const { data: publicUrlData } = await supabase
+          .storage
+          .from("document_files")
+          .getPublicUrl(filePath);
+        
+        if (publicUrlData && publicUrlData.publicUrl) {
+          thumbnails.push(publicUrlData.publicUrl);
+          
+          // Create or update the document page record
+          const { error: pageError } = await supabase
+            .from("document_pages")
+            .upsert({
+              document_id: documentId,
+              page_number: pageNumber,
+              image_url: publicUrlData.publicUrl,
+            }, {
+              onConflict: "document_id,page_number",
+              ignoreDuplicates: false,
+            });
+          
+          if (pageError) {
+            console.error(`Error saving page ${pageNumber} record:`, pageError);
+          }
+        }
+      } catch (pageError) {
+        console.error(`Error processing page ${pageNumber}:`, pageError);
+        await supabase.from("processing_logs").insert({
+          document_id: documentId,
+          action: "Page Processing Error",
+          status: "error",
+          message: `Error on page ${pageNumber}: ${pageError.message || 'Unknown error'}`
+        });
       }
       
-      // Update progress
-      const progressPercentage = Math.min(40 + Math.round(50 * (i + 1) / pages.length), 90);
-      await supabase
-        .from("documents")
-        .update({ processing_progress: progressPercentage })
-        .eq("id", documentId);
+      // Report progress for each processed page
+      await supabase.from("processing_logs").insert({
+        document_id: documentId,
+        action: "Page Processed",
+        status: "success",
+        message: `Completed page ${pageNumber} of ${pages.length}`
+      });
     }
     
     console.log(`Uploaded ${thumbnails.length} page images`);

@@ -131,9 +131,15 @@ export function FileUpload({
                         <div className="flex justify-between text-xs">
                           <span className="flex items-center">
                             <ImageIcon className="h-3 w-3 mr-1" />
-                            Converting pages to images
+                            {upload.pagesProcessed && upload.pageCount ? 
+                              `Converting page ${upload.pagesProcessed} of ${upload.pageCount}` : 
+                              'Processing document'}
                           </span>
-                          <span>{upload.pagesProcessed || 0} of {upload.pageCount || '?'} pages</span>
+                          <span>
+                            {upload.pagesProcessed && upload.pageCount ? 
+                              `${Math.round((upload.pagesProcessed / upload.pageCount) * 100)}%` : 
+                              'Processing...'}
+                          </span>
                         </div>
                         <Progress 
                           value={upload.pageCount ? (upload.pagesProcessed / upload.pageCount) * 100 : 0} 
@@ -144,7 +150,16 @@ export function FileUpload({
                     
                     {/* Simple progress bar for completed or other states */}
                     {(upload.status === 'complete' || (upload.status !== 'uploading' && upload.status !== 'processing' && upload.status !== 'error')) && (
-                      <Progress value={upload.progress} className="h-2" />
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-xs">
+                          <span className="flex items-center">
+                            <CheckIcon className="h-3 w-3 mr-1" />
+                            {upload.pageCount ? `${upload.pageCount} pages processed` : 'Processing complete'}
+                          </span>
+                          <span>100%</span>
+                        </div>
+                        <Progress value={100} className="h-2" />
+                      </div>
                     )}
                     
                     {/* Error message display */}

@@ -1,3 +1,4 @@
+
 import * as React from "react";
 import { FileUpload } from "@/components/ui/file-upload";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -154,6 +155,10 @@ export function DocumentUpload({
             
             console.log(`Created document record with ID: ${document.id}`);
             
+            // For PDFs, check page count immediately
+            let pageCount = 1; // Default for non-PDFs
+            
+            const originalFilePath = `${user.id}/${document.id}/original.pdf`;
             const filePath = `${user.id}/${document.id}/${encodeURIComponent(file.name)}`;
             
             const uploadOptions = {
@@ -192,6 +197,18 @@ export function DocumentUpload({
               });
             });
             
+            // Create a copy for original.pdf if it's a PDF file
+            if (file.type.includes('pdf')) {
+              const { error: originalUploadError } = await supabase.storage
+                .from('document_files')
+                .upload(originalFilePath, file, uploadOptions);
+                
+              if (originalUploadError) {
+                console.error("Error uploading original PDF:", originalUploadError);
+              }
+            }
+            
+            // Upload the file with its original name
             const { error: uploadError } = await supabase.storage
               .from('document_files')
               .upload(filePath, file, uploadOptions);
@@ -230,12 +247,22 @@ export function DocumentUpload({
             const { data: publicURL } = supabase.storage
               .from('document_files')
               .getPublicUrl(filePath);
+              
+            // For PDFs, get the public URL of the original.pdf file as well
+            let originalUrl = publicURL.publicUrl;
+            if (file.type.includes('pdf')) {
+              const { data: originalPublicURL } = supabase.storage
+                .from('document_files')
+                .getPublicUrl(originalFilePath);
+                
+              originalUrl = originalPublicURL.publicUrl;
+            }
             
             await supabase
               .from('documents')
               .update({
                 status: 'uploaded',
-                original_url: publicURL.publicUrl,
+                original_url: originalUrl,
                 updated_at: new Date().toISOString()
               })
               .eq('id', document.id);
@@ -256,6 +283,9 @@ export function DocumentUpload({
               
               // For PDFs, run the pdf-to-images process
               if (file.type.includes('pdf')) {
+                // Update UI immediately with initial state
+                updatePageProgress(uploadId, 0, 1); // Start with 0 of unknown (1 as placeholder) pages
+                
                 const { data: processingResult, error: processingError } = await supabase.functions
                   .invoke('pdf-to-images', {
                     body: { documentId: document.id, userId: user.id }
@@ -269,6 +299,7 @@ export function DocumentUpload({
                 console.log('Processing result:', processingResult);
                 
                 if (processingResult && processingResult.pageCount) {
+                  pageCount = processingResult.pageCount;
                   updatePageProgress(uploadId, processingResult.pageCount, processingResult.pageCount);
                 }
               } else {
@@ -289,6 +320,15 @@ export function DocumentUpload({
                   text_content: ""
                 });
               }
+              
+              // Update final document with page count
+              await supabase
+                .from('documents')
+                .update({
+                  page_count: pageCount,
+                  status: 'processed'
+                })
+                .eq('id', document.id);
               
               updateUploadStatus(uploadId, 'complete');
               setIsProcessing(false);
