@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Document } from "@/types";
-import { FileIcon, FilePenIcon, FileTextIcon, RotateCw, Trash2, FileImage } from "lucide-react";
+import { FileIcon, FilePenIcon, FileTextIcon, RotateCw, Trash2, FileImage, ExternalLink } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { useDocuments } from "@/context/DocumentContext";
@@ -27,8 +27,9 @@ export function DocumentCard({
   onDelete,
   className,
 }: DocumentCardProps) {
-  const { convertPdfToImages } = useDocuments();
+  const { convertPdfToImages, processDocumentText } = useDocuments();
   const [isConverting, setIsConverting] = React.useState(false);
+  const [isProcessingText, setIsProcessingText] = React.useState(false);
   const [progress, setProgress] = React.useState(document.processing_progress || 0);
 
   React.useEffect(() => {
@@ -77,6 +78,37 @@ export function DocumentCard({
       });
     } finally {
       setIsConverting(false);
+    }
+  };
+
+  const handleProcessText = async () => {
+    setIsProcessingText(true);
+    try {
+      await processDocumentText(document.id);
+      toast({
+        title: "Text processing started",
+        description: "Document text is being processed. This may take a moment.",
+      });
+    } catch (error) {
+      toast({
+        title: "Text processing failed",
+        description: error instanceof Error ? error.message : "An error occurred",
+        variant: "destructive",
+      });
+    } finally {
+      setIsProcessingText(false);
+    }
+  };
+
+  const openOriginalDocument = () => {
+    if (document.url) {
+      window.open(document.url, '_blank');
+    } else {
+      toast({
+        title: "Error",
+        description: "Original document URL not available",
+        variant: "destructive",
+      });
     }
   };
 
@@ -149,7 +181,8 @@ export function DocumentCard({
       <Separator className="mt-4" />
       
       <CardFooter className="p-3 flex gap-2 flex-wrap text-xs">
-        {(!document.thumbnails || document.status === "failed") && (
+        {/* Conversion button - always show for PDFs, or show retry for failed */}
+        {(document.type === "pdf" || document.status === "failed") && (
           <Button
             size="sm"
             variant="outline"
@@ -162,7 +195,7 @@ export function DocumentCard({
                 <RotateCw className="h-3 w-3 mr-1 animate-spin" />
                 Converting...
               </>
-            ) : document.thumbnails ? (
+            ) : document.thumbnails && document.thumbnails.length > 0 ? (
               <>
                 <RotateCw className="h-3 w-3 mr-1" />
                 Retry Conversion
@@ -176,6 +209,44 @@ export function DocumentCard({
           </Button>
         )}
         
+        {/* Text processing button */}
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 text-xs"
+          onClick={handleProcessText}
+          disabled={isProcessingText || document.status === "processing" || (!document.thumbnails || document.thumbnails.length === 0)}
+        >
+          {isProcessingText ? (
+            <>
+              <RotateCw className="h-3 w-3 mr-1 animate-spin" />
+              Processing...
+            </>
+          ) : document.transcription ? (
+            <>
+              <RotateCw className="h-3 w-3 mr-1" />
+              Reprocess Text
+            </>
+          ) : (
+            <>
+              <FileTextIcon className="h-3 w-3 mr-1" />
+              Process Text
+            </>
+          )}
+        </Button>
+        
+        {/* View original document button */}
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 text-xs"
+          onClick={openOriginalDocument}
+        >
+          <ExternalLink className="h-3 w-3 mr-1" />
+          View PDF
+        </Button>
+        
+        {/* View details button */}
         <Button
           size="sm"
           variant="outline"
@@ -185,16 +256,7 @@ export function DocumentCard({
           View Details
         </Button>
         
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-8 text-xs"
-          onClick={onProcess}
-          disabled={document.status === "processing"}
-        >
-          Process
-        </Button>
-        
+        {/* Delete button */}
         <Button
           size="sm"
           variant="outline"

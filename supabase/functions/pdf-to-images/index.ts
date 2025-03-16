@@ -96,10 +96,38 @@ serve(async (req) => {
       const pdfUrl = document.original_url;
       console.log(`Fetching PDF from URL: ${pdfUrl}`);
       
-      const pdfResponse = await fetch(pdfUrl);
-      
-      if (!pdfResponse.ok) {
-        throw new Error(`Failed to fetch PDF: ${pdfResponse.status} ${pdfResponse.statusText}`);
+      let pdfResponse;
+      try {
+        pdfResponse = await fetch(pdfUrl, {
+          headers: {
+            'Accept': 'application/pdf',
+            'Cache-Control': 'no-cache'
+          }
+        });
+        
+        if (!pdfResponse.ok) {
+          throw new Error(`Failed to fetch PDF: ${pdfResponse.status} ${pdfResponse.statusText}`);
+        }
+      } catch (fetchError) {
+        console.error("Error fetching PDF:", fetchError);
+        
+        // Try with a different approach - sometimes the URL might need encoding
+        const fallbackUrl = encodeURI(pdfUrl);
+        if (fallbackUrl !== pdfUrl) {
+          console.log(`Trying with encoded URL: ${fallbackUrl}`);
+          pdfResponse = await fetch(fallbackUrl, {
+            headers: {
+              'Accept': 'application/pdf',
+              'Cache-Control': 'no-cache'
+            }
+          });
+          
+          if (!pdfResponse.ok) {
+            throw new Error(`Failed to fetch PDF (encoded URL): ${pdfResponse.status} ${pdfResponse.statusText}`);
+          }
+        } else {
+          throw fetchError;
+        }
       }
       
       const pdfBuffer = await pdfResponse.arrayBuffer();

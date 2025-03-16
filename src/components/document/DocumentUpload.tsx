@@ -7,13 +7,14 @@ import { useUpload } from "@/context/UploadContext";
 import { useAuth } from "@/context/AuthContext";
 import { useDocuments } from "@/context/DocumentContext";
 import { toast } from "@/components/ui/use-toast";
-import { ArrowRight, FileText, Shield, AlertTriangle, RefreshCw } from "lucide-react";
+import { ArrowRight, FileText, Shield, AlertTriangle, RefreshCw, ExternalLink } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
 import { LoginModal } from "@/components/auth/LoginModal";
 import { Document } from "@/types";
 import { Separator } from "@/components/ui/separator";
+import { Badge } from "@/components/ui/badge";
 
 interface DocumentUploadProps {
   onDocumentsUploaded?: (documentIds: string[]) => void;
@@ -28,7 +29,7 @@ export function DocumentUpload({
 }: DocumentUploadProps) {
   const { isUploading, uploads, addUpload, updateUploadProgress, updateUploadStatus, updatePageProgress } = useUpload();
   const { user } = useAuth();
-  const { documents, isLoading, fetchUserDocuments, convertPdfToImages } = useDocuments();
+  const { documents, isLoading, fetchUserDocuments, convertPdfToImages, processDocumentText } = useDocuments();
   const navigate = useNavigate();
   const [selectedFiles, setSelectedFiles] = React.useState<File[]>([]);
   const [uploadedDocumentIds, setUploadedDocumentIds] = React.useState<string[]>([]);
@@ -266,16 +267,37 @@ export function DocumentUpload({
     }
   };
 
+  const handleProcessText = async (documentId: string) => {
+    try {
+      await processDocumentText(documentId);
+    } catch (error) {
+      console.error("Error processing document text:", error);
+      setError(`Failed to process document text: ${error.message}`);
+    }
+  };
+
+  const handleViewOriginalDocument = (url: string) => {
+    if (url) {
+      window.open(url, '_blank');
+    } else {
+      toast({
+        title: "Error",
+        description: "Original document URL not available",
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleContinue = () => {
     if (onDocumentsUploaded && uploadedDocumentIds.length > 0) {
       onDocumentsUploaded(uploadedDocumentIds);
     } else if (uploadedDocumentIds.length > 0) {
-      navigate(`/document/${uploadedDocumentIds[0]}`);
+      navigate(`/process`);
     }
   };
 
   const handleViewDocument = (documentId: string) => {
-    navigate(`/document/${documentId}`);
+    navigate(`/process?documentId=${documentId}`);
   };
 
   const handleAuthComplete = () => {
@@ -291,14 +313,22 @@ export function DocumentUpload({
   };
 
   const successfulUploads = uploads.filter(upload => upload.status === "complete").length;
+  const totalDocuments = documents.length;
 
   return (
     <>
       <Card className={className}>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <FileText className="h-5 w-5" />
-            Upload Documents
+          <CardTitle className="flex items-center gap-2 justify-between">
+            <div className="flex items-center gap-2">
+              <FileText className="h-5 w-5" />
+              Upload Documents
+            </div>
+            {totalDocuments > 0 && (
+              <Badge variant="outline" className="ml-2">
+                {totalDocuments} document{totalDocuments !== 1 ? 's' : ''}
+              </Badge>
+            )}
           </CardTitle>
         </CardHeader>
         
@@ -345,7 +375,10 @@ export function DocumentUpload({
           {user && documents.length > 0 && (
             <div className="mt-6">
               <Separator className="my-4" />
-              <h3 className="text-sm font-medium mb-2">Your Documents</h3>
+              <h3 className="text-sm font-medium mb-2 flex justify-between items-center">
+                <span>Your Documents</span>
+                <Badge variant="outline">{documents.length} total</Badge>
+              </h3>
               <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
                 {documents.map((doc) => (
                   <Card key={doc.id} className="p-3">
@@ -370,16 +403,41 @@ export function DocumentUpload({
                         </div>
                       </div>
                       <div className="flex space-x-2">
-                        {doc.status === "failed" && (
+                        {/* Original PDF view button */}
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handleViewOriginalDocument(doc.url)}
+                          title="View original PDF"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </Button>
+                        
+                        {/* Retry conversion button */}
+                        {(doc.status === "failed" || !doc.thumbnails || doc.thumbnails.length === 0) && (
                           <Button 
                             variant="outline" 
                             size="sm"
                             onClick={() => handleRetryProcessing(doc.id)}
+                            title="Retry conversion"
                           >
-                            <RefreshCw className="h-3.5 w-3.5 mr-1" />
-                            Retry
+                            <RefreshCw className="h-3.5 w-3.5" />
                           </Button>
                         )}
+                        
+                        {/* Process text button */}
+                        {doc.thumbnails && doc.thumbnails.length > 0 && (
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => handleProcessText(doc.id)}
+                            title="Process document text"
+                          >
+                            <FileText className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                        
+                        {/* View details button */}
                         <Button 
                           variant="secondary" 
                           size="sm"
@@ -421,6 +479,8 @@ export function DocumentUpload({
           <div className="text-sm text-muted-foreground">
             {successfulUploads > 0 ? (
               <span>{successfulUploads} document{successfulUploads > 1 ? 's' : ''} uploaded</span>
+            ) : totalDocuments > 0 ? (
+              <span>{totalDocuments} document{totalDocuments !== 1 ? 's' : ''} available</span>
             ) : (
               <span>Upload PDF documents to continue</span>
             )}
@@ -428,7 +488,7 @@ export function DocumentUpload({
           
           <Button 
             onClick={handleContinue}
-            disabled={uploads.length === 0 || isUploading || successfulUploads === 0 || isProcessing}
+            disabled={(uploads.length === 0 && documents.length === 0) || isUploading || isProcessing}
           >
             Continue <ArrowRight className="ml-2 h-4 w-4" />
           </Button>
