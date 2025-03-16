@@ -2,6 +2,30 @@
 import { GeminiPrompt } from "@/types";
 import { supabase } from "@/integrations/supabase/client";
 
+// Check if a document with the same name and size already exists
+export const checkDuplicateDocument = async (name: string, size: number, userId: string): Promise<boolean> => {
+  try {
+    const { data, error } = await supabase
+      .from("documents")
+      .select("id")
+      .eq("name", name)
+      .eq("size", size)
+      .eq("user_id", userId)
+      .eq("status", "processed") // Only consider processed documents as duplicates
+      .limit(1);
+      
+    if (error) {
+      console.error("Error checking for duplicate document:", error);
+      return false; // Proceed with upload if error checking for duplicates
+    }
+    
+    return data && data.length > 0;
+  } catch (error) {
+    console.error("Error in duplicate document check:", error);
+    return false; // Proceed with upload if error checking for duplicates
+  }
+};
+
 // Process prompt with Gemini using our edge function
 export const processWithGemini = async (prompt: GeminiPrompt): Promise<string> => {
   console.log("Processing with Gemini:", prompt);

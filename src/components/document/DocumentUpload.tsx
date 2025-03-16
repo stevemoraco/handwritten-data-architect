@@ -1,4 +1,3 @@
-
 import * as React from "react";
 import { FileUpload } from "@/components/ui/file-upload";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,6 +16,7 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { DocumentSelector } from "./DocumentSelector";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { checkDuplicateDocument } from "@/services/geminiService";
 
 interface DocumentUploadProps {
   onDocumentsUploaded?: (documentIds: string[]) => void;
@@ -69,6 +69,27 @@ export function DocumentUpload({
     try {
       const newDocumentIds = await Promise.all(
         files.map(async (file) => {
+          const isDuplicate = await checkDuplicateDocument(file.name, file.size, user.id);
+          
+          if (isDuplicate) {
+            toast({
+              title: "Duplicate document detected",
+              description: `${file.name} appears to be a duplicate of an existing document.`,
+              variant: "warning",
+            });
+            
+            const { data: existingDoc } = await supabase
+              .from('documents')
+              .select('id')
+              .eq('name', file.name)
+              .eq('size', file.size)
+              .eq('user_id', user.id)
+              .eq('status', 'processed')
+              .single();
+              
+            return existingDoc?.id;
+          }
+          
           const uploadId = addUpload(file.name);
           
           try {
@@ -194,7 +215,6 @@ export function DocumentUpload({
               const estimatedPageCount = Math.max(1, Math.ceil(file.size / 100000));
               updatePageProgress(uploadId, 0, estimatedPageCount);
               
-              // Directly call the PDF to images conversion function
               const { data: processingResult, error: processingError } = await supabase.functions
                 .invoke('pdf-to-images', {
                   body: { documentId: document.id, userId: user.id }
@@ -214,7 +234,6 @@ export function DocumentUpload({
               updateUploadStatus(uploadId, 'complete');
               setIsProcessing(false);
               
-              // Refresh the documents list to show the newly processed document
               await fetchUserDocuments();
             } catch (processingError) {
               console.error('Error processing document:', processingError);
@@ -253,7 +272,6 @@ export function DocumentUpload({
           description: `${successfulUploads.length} document${successfulUploads.length > 1 ? 's' : ''} uploaded.`,
         });
         
-        // Refresh documents list
         await fetchUserDocuments();
       }
     } catch (error) {
@@ -297,7 +315,6 @@ export function DocumentUpload({
   };
 
   const handleContinue = () => {
-    // Combine newly uploaded and selected existing documents
     const allSelectedDocumentIds = [
       ...uploadedDocumentIds,
       ...selectedExistingDocumentIds
@@ -415,7 +432,6 @@ export function DocumentUpload({
             </TabsContent>
           </Tabs>
           
-          {/* Status summary display */}
           <div className="mt-4 flex flex-wrap gap-2">
             {selectedExistingDocumentIds.length > 0 && (
               <Badge variant="outline" className="bg-primary/10">

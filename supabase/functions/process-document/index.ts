@@ -1,3 +1,4 @@
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.38.4";
 
@@ -682,5 +683,113 @@ Return your response as a JSON object with this structure:
     const prompt = {
       contents: [
         {
-
-
+          role: "user",
+          parts: promptParts
+        }
+      ],
+      generationConfig: {
+        temperature: 0.2,
+        topP: 0.8,
+        topK: 40,
+        maxOutputTokens: 8192,
+      }
+    };
+    
+    // Call Gemini API
+    console.log("Calling Gemini API for data extraction...");
+    
+    const startTime = Date.now();
+    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key=" + apiKey, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(prompt),
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("Gemini API error:", errorText);
+      throw new Error(`Gemini API error: ${response.status} ${response.statusText} - ${errorText}`);
+    }
+    
+    const result = await response.json();
+    const processingTime = ((Date.now() - startTime) / 1000).toFixed(2) + " seconds";
+    
+    console.log("Gemini API response received in", processingTime);
+    
+    if (!result.candidates || result.candidates.length === 0) {
+      throw new Error("Gemini API returned no candidates");
+    }
+    
+    if (result.candidates[0].finishReason === "SAFETY") {
+      throw new Error("Content was filtered due to safety concerns");
+    }
+    
+    if (!result.candidates[0].content || !result.candidates[0].content.parts || result.candidates[0].content.parts.length === 0) {
+      throw new Error("Gemini API returned empty content");
+    }
+    
+    // Get the extraction result
+    const extractionText = result.candidates[0].content.parts[0].text;
+    
+    // Clean up and parse the JSON
+    let extractedData;
+    try {
+      // Remove any markdown code block syntax if present
+      const jsonString = extractionText.replace(/```json|```/g, '').trim();
+      extractedData = JSON.parse(jsonString);
+      
+      // Add processing time if not already included
+      if (!extractedData.processingTime) {
+        extractedData.processingTime = processingTime;
+      }
+    } catch (error) {
+      console.error("Error parsing extraction JSON:", error);
+      console.error("Raw extraction text:", extractionText);
+      throw new Error("Failed to parse data extraction result as JSON");
+    }
+    
+    // Log successful extraction
+    await supabase.from("processing_logs").insert({
+      document_id: document.id,
+      action: "Data Extraction Complete",
+      status: "success",
+      message: `Successfully extracted data with ${extractedData.confidence * 100}% confidence`,
+    });
+    
+    // Update document status
+    await supabase
+      .from("documents")
+      .update({
+        extraction_data: extractedData,
+        extraction_schema_id: schemaId,
+        processing_progress: 100,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", document.id);
+    
+    return extractedData;
+  } catch (error) {
+    console.error("Error in data extraction:", error);
+    
+    // Log the specific error
+    await supabase.from("processing_logs").insert({
+      document_id: document.id,
+      action: "Data Extraction Error",
+      status: "error",
+      message: error.message || "Unknown error in data extraction",
+    });
+    
+    // Update document status but don't mark as failed (extraction can be retried)
+    await supabase
+      .from("documents")
+      .update({
+        processing_error: error.message || "Unknown error in data extraction",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", document.id);
+    
+    throw error;
+  }
+}
