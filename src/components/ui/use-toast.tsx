@@ -1,4 +1,5 @@
 
-import { useToast as useToastOriginal } from "@/components/ui/toast"
+// Re-export the hooks from our main implementation
+import { useToast, toast } from "@/hooks/use-toast";
 
-export const useToast = useToastOriginal;
+export { useToast, toast };

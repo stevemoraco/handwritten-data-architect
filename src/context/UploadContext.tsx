@@ -1,8 +1,7 @@
-
 import React, { createContext, useContext, useState, ReactNode } from 'react';
 import { UploadProgress } from '@/types';
 import { v4 as uuidv4 } from 'uuid';
-import { toast } from '@/components/ui/use-toast';
+import { toast } from '@/hooks/use-toast';
 
 interface UploadContextType {
   uploads: UploadProgress[];

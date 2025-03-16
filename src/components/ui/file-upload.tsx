@@ -10,10 +10,9 @@ import { useUpload } from '@/context/UploadContext';
 import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocumentProxy } from 'pdfjs-dist/types/src/display/api';
 import { supabase } from '@/integrations/supabase/client';
-import { toast } from "@/hooks/use-toast";
+import { useToast } from "@/hooks/use-toast";
 
-// Configure the worker source with a stable and reliable CDN URL
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+const pdfBaseUrl = 'https://mozilla.github.io/pdf.js/web/viewer.html?file=';
 
 interface FileUploadProps {
   accept?: Record<string, string[]>;
@@ -57,6 +56,7 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
   const [filePreviews, setFilePreviews] = useState<FilePreview[]>([]);
   const { uploads, isUploading, addUpload, updateUploadProgress, updateUploadStatus, updatePageProgress } = useUpload();
   const [userId, setUserId] = useState<string | null>(null);
+  const { toast } = useToast();
   
   useEffect(() => {
     const fetchUserId = async () => {
@@ -100,19 +100,78 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
     
     try {
       if (file.type.includes('pdf')) {
-        await processPdfFile(file);
+        const storageUrl = await uploadOriginalFile(file);
+        
+        setFilePreviews(prev => 
+          prev.map(p => 
+            p.file === file 
+              ? { 
+                  ...p, 
+                  storageUrl,
+                  pageCount: 1,
+                  isLoading: false,
+                  pages: [{
+                    pageNumber: 1,
+                    dataUrl: '/placeholder.svg',
+                  }]
+                }
+              : p
+          )
+        );
+        
+        toast({
+          title: "File uploaded to storage",
+          description: `${file.name} has been uploaded and is available for preview.`,
+        });
+        
+        processPdfFile(file).catch(error => {
+          console.error('PDF preview generation error:', error);
+        });
       } else if (file.type.includes('image')) {
         await processImageFile(file);
       }
     } catch (error) {
       console.error(`Error generating preview for ${file.name}:`, error);
-      setFilePreviews(prev => 
-        prev.map(p => 
-          p.file === file 
-            ? { ...p, isLoading: false, error: error instanceof Error ? error.message : 'Failed to generate preview' }
-            : p
-        )
-      );
+      
+      try {
+        const storageUrl = await uploadOriginalFile(file);
+        
+        setFilePreviews(prev => 
+          prev.map(p => 
+            p.file === file 
+              ? { 
+                  ...p, 
+                  storageUrl,
+                  isLoading: false,
+                  error: "Preview generation failed, but file was uploaded successfully."
+                }
+              : p
+          )
+        );
+        
+        toast({
+          title: "File uploaded",
+          description: `${file.name} was uploaded successfully, but preview generation failed.`,
+        });
+      } catch (uploadError) {
+        setFilePreviews(prev => 
+          prev.map(p => 
+            p.file === file 
+              ? { 
+                  ...p, 
+                  isLoading: false, 
+                  error: uploadError instanceof Error ? uploadError.message : 'Failed to upload file'
+                }
+              : p
+          )
+        );
+        
+        toast({
+          title: "Upload failed",
+          description: uploadError instanceof Error ? uploadError.message : "Failed to upload file",
+          variant: "destructive"
+        });
+      }
     }
   };
 
@@ -277,6 +336,11 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
     const tempId = Math.random().toString(36).substring(2, 15);
     const filePath = `${userId}/temp/${tempId}/${file.name}`;
     
+    toast({
+      title: "Uploading file...",
+      description: `${file.name} is being uploaded to storage.`,
+    });
+    
     const { data: uploadData, error: uploadError } = await supabase.storage
       .from('document_files')
       .upload(filePath, file, {
@@ -286,6 +350,11 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
     
     if (uploadError) {
       console.error(`Error uploading original file:`, uploadError);
+      toast({
+        title: "Upload failed",
+        description: uploadError.message,
+        variant: "destructive"
+      });
       throw uploadError;
     }
     
@@ -294,8 +363,18 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
       .getPublicUrl(filePath);
     
     if (!urlData || !urlData.publicUrl) {
+      toast({
+        title: "Upload failed",
+        description: "Failed to get public URL for uploaded file",
+        variant: "destructive"
+      });
       throw new Error('Failed to get public URL for uploaded file');
     }
+    
+    toast({
+      title: "Upload complete",
+      description: `${file.name} has been uploaded successfully.`,
+    });
     
     setFilePreviews(prev => 
       prev.map(p => 
@@ -401,13 +480,14 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
                     <div className="flex space-x-1">
                       {preview.storageUrl && (
                         <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
+                          variant="default"
+                          size="sm"
+                          className="h-7"
                           onClick={() => window.open(preview.storageUrl, '_blank')}
                           title="View file in storage"
                         >
-                          <ExternalLinkIcon className="h-4 w-4" />
+                          <ExternalLinkIcon className="h-4 w-4 mr-1" /> 
+                          Preview
                         </Button>
                       )}
                       <Button
@@ -434,33 +514,48 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
                           <AlertCircleIcon className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
                           <p className="text-xs text-muted-foreground">Failed to generate preview</p>
                           <p className="text-xs text-destructive mt-1">{preview.error}</p>
-                          <Button 
-                            variant="outline" 
-                            size="sm" 
-                            className="mt-2"
-                            onClick={async () => {
-                              try {
-                                const url = await uploadOriginalFile(preview.file);
-                                toast({
-                                  title: "File uploaded",
-                                  description: "Original file uploaded to storage",
-                                });
-                              } catch (error) {
-                                console.error('Error uploading file:', error);
-                                toast({
-                                  title: "Upload failed",
-                                  description: error instanceof Error ? error.message : "Failed to upload file",
-                                  variant: "destructive"
-                                });
-                              }
-                            }}
-                          >
-                            Upload Original
-                          </Button>
+                          {!preview.storageUrl && (
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              className="mt-2"
+                              onClick={async () => {
+                                try {
+                                  const url = await uploadOriginalFile(preview.file);
+                                  toast({
+                                    title: "File uploaded",
+                                    description: "Original file uploaded to storage",
+                                  });
+                                } catch (error) {
+                                  console.error('Error uploading file:', error);
+                                  toast({
+                                    title: "Upload failed",
+                                    description: error instanceof Error ? error.message : "Failed to upload file",
+                                    variant: "destructive"
+                                  });
+                                }
+                              }}
+                            >
+                              Upload Original
+                            </Button>
+                          )}
                         </div>
                       </div>
                     ) : (
                       <div>
+                        {preview.storageUrl && preview.file.type.includes('pdf') && (
+                          <div className="p-3 mb-2 flex justify-center">
+                            <Button 
+                              variant="outline" 
+                              onClick={() => window.open(preview.storageUrl, '_blank')}
+                              className="w-full"
+                            >
+                              <FileIcon className="h-4 w-4 mr-2" />
+                              View Original PDF
+                            </Button>
+                          </div>
+                        )}
+                        
                         <div className="flex overflow-x-auto snap-x scrollbar-thin scrollbar-thumb-rounded scrollbar-thumb-muted-foreground/30 gap-1 p-1">
                           {preview.pages.map((page) => (
                             <div 
@@ -537,4 +632,3 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
 });
 
 FileUpload.displayName = 'FileUpload';
-
