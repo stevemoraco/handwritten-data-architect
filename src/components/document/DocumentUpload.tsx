@@ -7,7 +7,7 @@ import { useUpload } from "@/context/UploadContext";
 import { useDocuments } from "@/context/DocumentContext";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "@/components/ui/use-toast";
-import { ArrowRight, FileText, Lock } from "lucide-react";
+import { ArrowRight, FileText, Lock, Shield, User } from "lucide-react";
 import { 
   Dialog, 
   DialogContent, 
@@ -87,7 +87,7 @@ export function DocumentUpload({
     setShowAuthDialog(false);
     toast({
       title: "Account created successfully",
-      description: "You can now securely upload your documents.",
+      description: "You can now securely upload and process your documents.",
     });
   };
 
@@ -116,10 +116,18 @@ export function DocumentUpload({
         <CardContent>
           {!user && (
             <Alert className="mb-4 border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-              <Lock className="h-4 w-4" />
+              <Shield className="h-4 w-4" />
               <AlertTitle>Secure document handling</AlertTitle>
-              <AlertDescription>
-                To upload and process your documents securely, you'll need to create an account or sign in.
+              <AlertDescription className="mt-2">
+                <p className="mb-2">
+                  To upload and process your documents securely, you'll need to create an account or sign in.
+                  Your account ensures that:
+                </p>
+                <ul className="list-disc pl-5 space-y-1">
+                  <li>Your documents remain private and secure</li>
+                  <li>You can access your processed documents later</li>
+                  <li>Your processing history is saved for future reference</li>
+                </ul>
               </AlertDescription>
             </Alert>
           )}
@@ -152,10 +160,27 @@ export function DocumentUpload({
       <Dialog open={showAuthDialog} onOpenChange={setShowAuthDialog}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Create an account</DialogTitle>
-            <DialogDescription>
-              To upload your documents securely and keep track of your processing history, 
-              please create an account or sign in.
+            <DialogTitle className="flex items-center gap-2">
+              <User className="h-5 w-5" />
+              Create Your Secure Account
+            </DialogTitle>
+            <DialogDescription className="pt-2 pb-1">
+              <div className="space-y-2">
+                <p>
+                  Your documents contain valuable information. Creating an account ensures your data remains 
+                  secure and accessible only to you.
+                </p>
+                <div className="pt-1 flex flex-col space-y-1.5">
+                  <div className="flex items-start gap-2">
+                    <Lock className="h-4 w-4 mt-0.5 text-primary" />
+                    <span className="text-sm">End-to-end security for your sensitive documents</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <Shield className="h-4 w-4 mt-0.5 text-primary" />
+                    <span className="text-sm">Complete control over your data and processing history</span>
+                  </div>
+                </div>
+              </div>
             </DialogDescription>
           </DialogHeader>
           <AuthForm onComplete={handleAuthComplete} />
