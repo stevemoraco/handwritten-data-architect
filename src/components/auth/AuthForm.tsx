@@ -30,14 +30,23 @@ export function AuthForm({ onComplete }: AuthFormProps) {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (isSubmitting) return; // Prevent multiple submissions
+    
     setIsSubmitting(true);
     
     try {
       await login(email, password);
+      // The login function will handle showing success/error messages
       if (onComplete) onComplete();
     } catch (error) {
-      // Error is already handled in the login function
+      // This will catch and handle any errors not caught in the login function
       console.error("Login error:", error);
+      toast({
+        title: "Login failed",
+        description: error instanceof Error ? error.message : "An unknown error occurred. Please try again.",
+        variant: "destructive",
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -45,25 +54,63 @@ export function AuthForm({ onComplete }: AuthFormProps) {
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (isSubmitting) return; // Prevent multiple submissions
+    
     setIsSubmitting(true);
     
     try {
       await register(name, email, password);
+      // The register function will handle showing success/error messages
       if (onComplete) onComplete();
     } catch (error) {
-      // Error is already handled in the register function
+      // This will catch and handle any errors not caught in the register function
       console.error("Register error:", error);
+      toast({
+        title: "Registration failed",
+        description: error instanceof Error ? error.message : "An unknown error occurred. Please try again.",
+        variant: "destructive",
+      });
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const handleForgotPassword = () => {
-    // This is currently a placeholder - we can implement password reset functionality here
-    toast({
-      title: "Reset password",
-      description: "Password reset functionality will be implemented soon.",
-    });
+    if (isSubmitting) return;
+    
+    if (!email) {
+      toast({
+        title: "Email required",
+        description: "Please enter your email address first.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    setIsSubmitting(true);
+    
+    // Get the forgotPassword function from useAuth
+    const { forgotPassword } = useAuth();
+    
+    forgotPassword(email)
+      .then(() => {
+        toast({
+          title: "Password reset email sent",
+          description: "If an account exists with this email, you'll receive a password reset link.",
+        });
+      })
+      .catch((error) => {
+        console.error("Forgot password error:", error);
+        toast({
+          title: "Password reset failed",
+          description: error instanceof Error ? error.message : "An unknown error occurred. Please try again.",
+          variant: "destructive",
+        });
+      })
+      .finally(() => {
+        setIsSubmitting(false);
+      });
   };
 
   return (
@@ -85,6 +132,7 @@ export function AuthForm({ onComplete }: AuthFormProps) {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                disabled={isSubmitting}
                 className="glass-input"
               />
             </div>
@@ -97,6 +145,7 @@ export function AuthForm({ onComplete }: AuthFormProps) {
                   className="p-0 h-auto text-xs" 
                   type="button"
                   onClick={handleForgotPassword}
+                  disabled={isSubmitting}
                 >
                   Forgot Password?
                 </Button>
@@ -108,6 +157,7 @@ export function AuthForm({ onComplete }: AuthFormProps) {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
+                disabled={isSubmitting}
                 className="glass-input"
               />
             </div>
@@ -129,6 +179,7 @@ export function AuthForm({ onComplete }: AuthFormProps) {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
+                disabled={isSubmitting}
                 className="glass-input"
               />
             </div>
@@ -142,6 +193,7 @@ export function AuthForm({ onComplete }: AuthFormProps) {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                disabled={isSubmitting}
                 className="glass-input"
               />
             </div>
@@ -155,6 +207,7 @@ export function AuthForm({ onComplete }: AuthFormProps) {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
+                disabled={isSubmitting}
                 className="glass-input"
               />
             </div>
