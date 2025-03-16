@@ -147,71 +147,85 @@ export function AuthProvider({ children }: AuthProviderProps) {
   };
 
   const signInWithGoogle = async () => {
-    try {
-      const width = 500;
-      const height = 700;
-      const left = window.screenX + (window.outerWidth - width) / 2;
-      const top = window.screenY + (window.outerHeight - height) / 2;
-      
-      const popup = window.open(
-        'about:blank',
-        'Google Sign In',
-        `width=${width},height=${height},left=${left},top=${top}`
-      );
-      
-      if (!popup) {
+    return new Promise<void>(async (resolve, reject) => {
+      try {
+        const width = 500;
+        const height = 700;
+        const left = window.screenX + (window.outerWidth - width) / 2;
+        const top = window.screenY + (window.outerHeight - height) / 2;
+        
+        const popup = window.open(
+          'about:blank',
+          'Google Sign In',
+          `width=${width},height=${height},left=${left},top=${top}`
+        );
+        
+        if (!popup) {
+          toast({
+            title: 'Popup Blocked',
+            description: 'Please allow popups for this site to use Google Sign In.',
+            variant: 'destructive',
+          });
+          reject(new Error('Popup blocked'));
+          return;
+        }
+        
+        const messageHandler = (event: MessageEvent) => {
+          if (
+            event.origin === window.location.origin && 
+            event.data?.type?.startsWith('SUPABASE_AUTH')
+          ) {
+            console.log('Received auth message from popup:', event.data);
+            
+            window.removeEventListener('message', messageHandler);
+            
+            if (event.data.error) {
+              toast({
+                title: 'Google sign in failed',
+                description: event.data.error || 'An error occurred during Google sign in',
+                variant: 'destructive',
+              });
+              reject(new Error(event.data.error));
+            } else {
+              resolve();
+            }
+          }
+        };
+        
+        window.addEventListener('message', messageHandler);
+        
+        const { data, error } = await supabase.auth.signInWithOAuth({
+          provider: 'google',
+          options: {
+            redirectTo: `${window.location.origin}/auth/callback`,
+            queryParams: {
+              access_type: 'offline',
+              prompt: 'consent',
+            }
+          }
+        });
+        
+        if (error) {
+          window.removeEventListener('message', messageHandler);
+          reject(error);
+          throw error;
+        }
+        
+        if (data && data.url) {
+          popup.location.href = data.url;
+        } else {
+          window.removeEventListener('message', messageHandler);
+          reject(new Error('No OAuth URL returned'));
+        }
+      } catch (error: any) {
         toast({
-          title: 'Popup Blocked',
-          description: 'Please allow popups for this site to use Google Sign In.',
+          title: 'Google sign in failed',
+          description: error.message || 'An error occurred during Google sign in',
           variant: 'destructive',
         });
-        return;
+        reject(error);
       }
-      
-      const messageListener = (event: MessageEvent) => {
-        if (
-          event.origin === window.location.origin && 
-          event.data?.type?.startsWith('SUPABASE_AUTH')
-        ) {
-          console.log('Received auth message from popup:', event.data);
-          
-          if (event.data.error) {
-            toast({
-              title: 'Google sign in failed',
-              description: event.data.error || 'An error occurred during Google sign in',
-              variant: 'destructive',
-            });
-          }
-          
-          window.removeEventListener('message', messageListener);
-        }
-      };
-      
-      window.addEventListener('message', messageListener);
-      
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
-          queryParams: {
-            access_type: 'offline',
-            prompt: 'consent',
-          }
-        }
-      });
-      
-      if (error) throw error;
-      
-      if (data && data.url) {
-        popup.location.href = data.url;
-      }
-    } catch (error: any) {
-      toast({
-        title: 'Google sign in failed',
-        description: error.message || 'An error occurred during Google sign in',
-        variant: 'destructive',
-      });
-    }
+    });
   };
 
   const signOut = async () => {

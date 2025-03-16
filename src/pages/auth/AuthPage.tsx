@@ -65,7 +65,7 @@ export default function AuthPage() {
     try {
       setIsSubmitting(true);
       await signInWithEmail(email, password);
-      navigate(redirectTo, { replace: true });
+      // Navigation will be handled by the useEffect when user state changes
     } catch (error) {
       console.error('Sign in error:', error);
     } finally {
@@ -81,7 +81,7 @@ export default function AuthPage() {
     try {
       setIsSubmitting(true);
       await signUpWithEmail(email, password, name);
-      // No navigate here as the auth state listener will handle it
+      // Navigation will be handled by the useEffect when user state changes
     } catch (error) {
       console.error('Sign up error:', error);
     } finally {
@@ -90,11 +90,15 @@ export default function AuthPage() {
   };
 
   const handleGoogleSignIn = async () => {
+    if (isSubmitting) return;
+    
     try {
       setIsSubmitting(true);
       await signInWithGoogle();
+      // Navigation will be handled by the useEffect when user state changes
     } catch (error) {
       console.error('Google sign in error:', error);
+    } finally {
       setIsSubmitting(false);
     }
   };
