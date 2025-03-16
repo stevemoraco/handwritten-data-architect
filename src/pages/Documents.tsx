@@ -3,7 +3,7 @@ import * as React from "react";
 import { useNavigate } from "react-router-dom";
 import { useDocuments } from "@/context/DocumentContext";
 import { Button } from "@/components/ui/button";
-import { PlusIcon, ArrowUpIcon, Trash2, RefreshCw } from "lucide-react";
+import { PlusIcon, ArrowUpIcon, Trash2, RefreshCw, FileText } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { BatchDocumentsSelector } from "@/components/document/BatchDocumentsSelector";
 import {
@@ -25,6 +25,8 @@ export default function Documents() {
   const [selectedDocumentIds, setSelectedDocumentIds] = React.useState<string[]>([]);
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
   const [isRefreshing, setIsRefreshing] = React.useState(false);
+  const [selectedDocument, setSelectedDocument] = React.useState<any>(null);
+  const [urlDialogOpen, setUrlDialogOpen] = React.useState(false);
 
   // Using a ref to track if we've already fetched documents
   const fetchedRef = React.useRef(false);
@@ -149,6 +151,123 @@ export default function Documents() {
     }
   };
 
+  // New functions to test different URL strategies
+  const openWithOriginalUrl = (doc: any) => {
+    if (!doc.original_url) {
+      toast({
+        title: "URL Missing",
+        description: "Original URL is not available for this document",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    window.open(doc.original_url, '_blank');
+    
+    // Log for debugging
+    console.log("Opened with original_url:", doc.original_url);
+    
+    toast({
+      title: "Opening document",
+      description: "Using original_url strategy"
+    });
+  };
+  
+  const openWithUrl = (doc: any) => {
+    if (!doc.url) {
+      toast({
+        title: "URL Missing",
+        description: "URL is not available for this document",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    window.open(doc.url, '_blank');
+    
+    // Log for debugging
+    console.log("Opened with url:", doc.url);
+    
+    toast({
+      title: "Opening document",
+      description: "Using url strategy"
+    });
+  };
+  
+  const openWithReconstructedIdPath = async (doc: any) => {
+    if (!doc.userId || !doc.id) {
+      toast({
+        title: "Missing Data",
+        description: "Cannot reconstruct URL: missing user ID or document ID",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    const pathWithId = `${doc.userId}/${doc.id}/original${doc.type === 'pdf' ? '.pdf' : ''}`;
+    const { data: urlWithId } = await supabase.storage
+      .from("document_files")
+      .getPublicUrl(pathWithId);
+      
+    if (urlWithId?.publicUrl) {
+      window.open(urlWithId.publicUrl, '_blank');
+      
+      // Log for debugging
+      console.log("Opened with reconstructed ID path:", urlWithId.publicUrl);
+      
+      toast({
+        title: "Opening document",
+        description: "Using reconstructed ID path strategy"
+      });
+    } else {
+      toast({
+        title: "URL Missing",
+        description: "Could not reconstruct URL with ID path",
+        variant: "destructive"
+      });
+    }
+  };
+  
+  const openWithReconstructedNamePath = async (doc: any) => {
+    if (!doc.userId || !doc.name) {
+      toast({
+        title: "Missing Data",
+        description: "Cannot reconstruct URL: missing user ID or document name",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    const filename = encodeURIComponent(doc.name);
+    const pathWithName = `${doc.userId}/uploads/${filename}`;
+    const { data: urlWithName } = await supabase.storage
+      .from("document_files")
+      .getPublicUrl(pathWithName);
+      
+    if (urlWithName?.publicUrl) {
+      window.open(urlWithName.publicUrl, '_blank');
+      
+      // Log for debugging
+      console.log("Opened with reconstructed name path:", urlWithName.publicUrl);
+      
+      toast({
+        title: "Opening document",
+        description: "Using reconstructed name path strategy"
+      });
+    } else {
+      toast({
+        title: "URL Missing",
+        description: "Could not reconstruct URL with name path",
+        variant: "destructive"
+      });
+    }
+  };
+  
+  const showUrlStrategies = (doc: any) => {
+    setSelectedDocument(doc);
+    setUrlDialogOpen(true);
+  };
+
   return (
     <div className="container py-10">
       <div className="flex items-center justify-between">
@@ -190,7 +309,106 @@ export default function Documents() {
       
       <BatchDocumentsSelector 
         onSelectionChange={setSelectedDocumentIds}
+        extraActions={(doc) => (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => showUrlStrategies(doc)}
+            className="p-2 h-8"
+            title="Test URL strategies"
+          >
+            <FileText className="h-4 w-4" />
+          </Button>
+        )}
       />
+      
+      {/* URL Strategy Test Dialog */}
+      <AlertDialog open={urlDialogOpen} onOpenChange={setUrlDialogOpen}>
+        <AlertDialogContent className="max-w-lg">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Test URL Access Strategies</AlertDialogTitle>
+            <AlertDialogDescription>
+              {selectedDocument && (
+                <div className="mb-4">
+                  <p className="font-medium">{selectedDocument.name}</p>
+                  <p className="text-xs text-muted-foreground truncate">Document ID: {selectedDocument.id}</p>
+                </div>
+              )}
+              Choose a strategy to attempt opening this document:
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          
+          <div className="grid grid-cols-1 gap-2 my-2">
+            <Button 
+              variant="outline" 
+              className="justify-start text-left"
+              onClick={() => {
+                setUrlDialogOpen(false);
+                if (selectedDocument) openWithOriginalUrl(selectedDocument);
+              }}
+            >
+              <div>
+                <div className="font-medium">Strategy 1: Use original_url</div>
+                <div className="text-xs text-muted-foreground truncate">
+                  {selectedDocument?.original_url || 'Not available'}
+                </div>
+              </div>
+            </Button>
+            
+            <Button 
+              variant="outline" 
+              className="justify-start text-left"
+              onClick={() => {
+                setUrlDialogOpen(false);
+                if (selectedDocument) openWithUrl(selectedDocument);
+              }}
+            >
+              <div>
+                <div className="font-medium">Strategy 2: Use url</div>
+                <div className="text-xs text-muted-foreground truncate">
+                  {selectedDocument?.url || 'Not available'}
+                </div>
+              </div>
+            </Button>
+            
+            <Button 
+              variant="outline" 
+              className="justify-start text-left"
+              onClick={() => {
+                setUrlDialogOpen(false);
+                if (selectedDocument) openWithReconstructedIdPath(selectedDocument);
+              }}
+            >
+              <div>
+                <div className="font-medium">Strategy 3: Reconstruct with ID path</div>
+                <div className="text-xs text-muted-foreground">
+                  userId/documentId/original.pdf
+                </div>
+              </div>
+            </Button>
+            
+            <Button 
+              variant="outline" 
+              className="justify-start text-left"
+              onClick={() => {
+                setUrlDialogOpen(false);
+                if (selectedDocument) openWithReconstructedNamePath(selectedDocument);
+              }}
+            >
+              <div>
+                <div className="font-medium">Strategy 4: Reconstruct with name path</div>
+                <div className="text-xs text-muted-foreground">
+                  userId/uploads/filename
+                </div>
+              </div>
+            </Button>
+          </div>
+          
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
@@ -241,3 +459,4 @@ export default function Documents() {
     </div>
   );
 }
+
