@@ -32,18 +32,23 @@ export default function AuthCallback() {
           } else {
             console.log('Session set successfully');
           }
+          
+          // Let the opener know authentication is complete
+          if (window.opener) {
+            window.opener.postMessage(
+              { type: 'SUPABASE_AUTH_COMPLETE', accessToken, refreshToken },
+              window.location.origin
+            );
+            
+            // Add a small delay before closing the window to ensure the message is sent
+            setTimeout(() => window.close(), 1000);
+          } else {
+            window.close();
+          }
+        } else {
+          // No access token found, close the window
+          window.close();
         }
-        
-        // Let the opener know authentication is complete
-        if (window.opener) {
-          window.opener.postMessage(
-            { type: 'SUPABASE_AUTH_COMPLETE', accessToken, refreshToken },
-            window.location.origin
-          );
-        }
-        
-        // Close the popup
-        window.close();
       } catch (error) {
         console.error('Error handling auth callback:', error);
         // Try to close the window anyway

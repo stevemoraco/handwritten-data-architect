@@ -141,7 +141,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       if (event.origin !== window.location.origin) return;
       
       if (event.data?.type === 'SUPABASE_AUTH_COMPLETE') {
-        console.log('Auth popup closed, data received:', event.data);
+        console.log('Auth popup completed, data received:', event.data);
         
         // If tokens were received, set the session
         if (event.data.accessToken) {
@@ -153,8 +153,19 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
             
             if (error) {
               console.error('Error setting session from popup data:', error);
+              toast({
+                title: "Authentication failed",
+                description: error.message,
+                variant: "destructive",
+              });
             } else {
               console.log('Session set successfully from popup data');
+              
+              // Show success toast
+              toast({
+                title: "Signed in successfully",
+                description: "You are now logged in.",
+              });
               
               // Fetch and set the user data immediately rather than waiting for the auth listener
               const { data: userData } = await supabase.auth.getUser();
@@ -174,6 +185,11 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
             }
           } catch (err) {
             console.error('Failed to process popup auth data:', err);
+            toast({
+              title: "Authentication failed",
+              description: "Failed to complete authentication process.",
+              variant: "destructive",
+            });
           }
         }
       }
@@ -386,7 +402,12 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       const checkPopupClosed = setInterval(() => {
         if (popupWindow.closed) {
           clearInterval(checkPopupClosed);
-          console.log('Auth popup was closed');
+          console.log('Auth popup was closed manually');
+          // If popup is closed manually without completing auth, show a message
+          toast({
+            title: "Authentication canceled",
+            description: "The authentication process was canceled.",
+          });
         }
       }, 500);
       
