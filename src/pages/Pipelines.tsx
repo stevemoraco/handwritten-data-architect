@@ -38,16 +38,45 @@ export default function Pipelines() {
       setIsLoading(true);
       // Fetch real pipelines data from database
       const { data, error } = await supabase
-        .from('document_pipelines')
-        .select('*')
-        .order('created_at', { ascending: false });
+        .from('documents')
+        .select('pipeline_id, name')
+        .not('pipeline_id', 'is', null);
 
       if (error) {
         throw error;
       }
 
       if (data) {
-        setPipelines(data as Pipeline[]);
+        // Get unique pipeline IDs
+        const pipelineIds = [...new Set(data.map(doc => doc.pipeline_id))];
+        
+        // If there are pipeline IDs, fetch the full pipeline details
+        if (pipelineIds.length > 0) {
+          // This would be replaced with actual pipeline data when table exists
+          // For now, construct mock data based on document pipeline IDs
+          const pipelineData: Pipeline[] = await Promise.all(
+            pipelineIds.map(async (id) => {
+              const { data: docs } = await supabase
+                .from('documents')
+                .select('*')
+                .eq('pipeline_id', id);
+              
+              return {
+                id: id,
+                name: docs?.[0]?.name ? `Pipeline for ${docs[0].name}` : "Document Pipeline",
+                description: "Automated document processing workflow",
+                document_count: docs?.length || 0,
+                last_processed: new Date().toISOString(),
+                status: "active",
+                created_at: new Date().toISOString()
+              };
+            })
+          );
+          
+          setPipelines(pipelineData);
+        } else {
+          setPipelines([]);
+        }
       }
     } catch (error) {
       console.error("Error fetching pipelines:", error);

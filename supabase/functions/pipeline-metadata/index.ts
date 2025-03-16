@@ -126,54 +126,32 @@ serve(async (req) => {
         description: `Processing pipeline for ${documentNames}`
       };
     }
+    
+    // At this point, we'd normally create the pipeline record in the database
+    // Since we don't have the table yet, we'll update document pipeline_id fields directly
 
-    // Create pipeline record
-    const { data: pipeline, error: pipelineError } = await supabase
-      .from('document_pipelines')
-      .insert({
-        name: metadata.name,
-        description: metadata.description,
-        document_count: documentIds.length,
-        status: 'active'
-      })
-      .select()
-      .single();
-
-    if (pipelineError) {
-      console.error("Error creating pipeline:", pipelineError);
-      return new Response(
-        JSON.stringify({ error: 'Failed to create pipeline' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    // Associate documents with pipeline
-    const pipelineDocuments = documentIds.map(docId => ({
-      pipeline_id: pipeline.id,
-      document_id: docId
-    }));
-
-    const { error: pipelineDocsError } = await supabase
-      .from('pipeline_documents')
-      .insert(pipelineDocuments);
-
-    if (pipelineDocsError) {
-      console.error("Error linking documents to pipeline:", pipelineDocsError);
-      // Continue even if linking fails
-    }
-
+    // Generate a unique ID for this pipeline
+    const pipelineId = crypto.randomUUID();
+    
     // Update document's pipeline_id
     for (const docId of documentIds) {
       await supabase
         .from('documents')
-        .update({ pipeline_id: pipeline.id })
+        .update({ pipeline_id: pipelineId })
         .eq('id', docId);
     }
 
     return new Response(
       JSON.stringify({ 
         success: true, 
-        pipeline: pipeline 
+        pipeline: {
+          id: pipelineId,
+          name: metadata.name,
+          description: metadata.description,
+          document_count: documentIds.length,
+          status: 'active',
+          created_at: new Date().toISOString()
+        }
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
