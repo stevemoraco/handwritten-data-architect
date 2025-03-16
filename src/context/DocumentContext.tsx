@@ -116,7 +116,7 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         structure: schema.structure as any,
         description: schema.description || "",
         rationale: schema.rationale || "",
-        suggestions: schema.suggestions as any || [],
+        suggestions: schema.suggestions as any[] || [],
         createdAt: schema.created_at,
         updatedAt: schema.updated_at,
         organizationId: schema.organization_id || ""
