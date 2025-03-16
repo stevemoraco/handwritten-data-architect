@@ -41,15 +41,19 @@ export const processWithGemini = async (prompt: GeminiPrompt): Promise<string> =
       body = {
         documentId: prompt.documentId,
         operation,
-        model: "gemini-1.5-flash-latest"  // Explicitly specify model
+        model: "gemini-2.0-flash-lite",  // Updated to the latest model
+        includeImages: prompt.includeImages,
+        prompt: prompt.prompt
       };
+      console.log("Using Gemini 2.0 Flash Lite for transcription");
     } else if (prompt.prompt.includes("schema")) {
       operation = 'generateSchema';
       body = {
         documentId: prompt.documentId,
         documentIds: prompt.documentIds || [prompt.documentId],
         operation,
-        model: "gemini-1.5-flash-latest"  // Explicitly specify model
+        model: "gemini-2.0-flash-lite",  // Updated to the latest model
+        includeTranscription: prompt.includeTranscription
       };
       
       // After schema generation, create a pipeline automatically
@@ -67,7 +71,8 @@ export const processWithGemini = async (prompt: GeminiPrompt): Promise<string> =
         documentId: prompt.documentId,
         schemaId: prompt.schemaId,
         operation,
-        model: "gemini-1.5-flash-latest"  // Explicitly specify model
+        model: "gemini-2.0-flash-lite",  // Updated to the latest model
+        includeImages: prompt.includeImages
       };
     }
     
@@ -147,6 +152,7 @@ Important instructions:
 4. Preserve the relationships between questions and answers.
 5. If handwriting is unclear, indicate with [illegible] but make your best guess if possible.
 6. Include ALL text content, including headers, footers, and any notes.
+7. Properly format any tables you find using markdown table syntax.
 
 The output should be a complete, accurate transcription that could be used as a text-only reference for the original document.`,
     includeImages: true,

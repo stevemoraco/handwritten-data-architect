@@ -1,24 +1,12 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
-import { decode as base64Decode } from "https://deno.land/std@0.177.0/encoding/base64.ts";
 
-// CORS headers
+// CORS headers for browser requests
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
-
-// Create response with CORS headers
-function responseWithCors(body: any, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      'Content-Type': 'application/json',
-      ...corsHeaders,
-    },
-  });
-}
 
 serve(async (req) => {
   // Handle CORS preflight request
@@ -27,527 +15,636 @@ serve(async (req) => {
   }
 
   try {
-    const requestData = await req.json();
-    const { documentId, documentIds, operation, schemaId } = requestData;
-
-    if (!documentId && !documentIds) {
-      return responseWithCors({
-        success: false,
-        error: "Missing required parameter: documentId or documentIds"
-      }, 400);
-    }
-
+    const { documentId, documentIds, schemaId, operation, model = "gemini-2.0-flash-lite", includeImages = true, includeTranscription = false, prompt } = await req.json();
+    
+    console.log(`Processing document operation: ${operation}`, { documentId, documentIds, schemaId, model });
+    
     // Initialize Supabase client
     const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
-    
-    if (!supabaseUrl || !supabaseServiceKey) {
-      return responseWithCors({
-        success: false,
-        error: "Server configuration error: Missing Supabase credentials"
-      }, 500);
-    }
-    
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    console.log(`Processing document operation: ${operation} for document(s): ${documentId || documentIds?.join(', ')}`);
-    
-    // Log start of processing
-    if (documentId) {
-      await supabase.from('processing_logs').insert({
-        document_id: documentId,
-        action: `${operation} Start`,
-        status: 'success',
-        message: `Started ${operation} operation`
-      });
+    // Get Gemini API key
+    const geminiApiKey = Deno.env.get('GEMINI_API_KEY');
+    if (!geminiApiKey) {
+      throw new Error("Gemini API key not found");
     }
 
-    // Perform the requested operation
-    if (operation === 'generateSchema') {
-      return await generateSchema(supabase, documentIds);
-    } else if (operation === 'extractData') {
-      if (!schemaId) {
-        return responseWithCors({
-          success: false,
-          error: "Missing required parameter: schemaId"
-        }, 400);
+    try {
+      // Log start of operation
+      if (documentId) {
+        await supabase
+          .from('processing_logs')
+          .insert({
+            document_id: documentId,
+            action: `Gemini ${operation}`,
+            status: 'success',
+            message: `Started ${operation} operation`
+          });
       }
-      return await extractData(supabase, documentId, schemaId);
-    } else {
-      return responseWithCors({
-        success: false,
-        error: `Unknown operation: ${operation}`
-      }, 400);
+
+      let result;
+      
+      if (operation === 'transcribe') {
+        result = await transcribeDocument(documentId, model, geminiApiKey, supabase, includeImages, prompt);
+      } else if (operation === 'generateSchema') {
+        result = await generateSchema(documentIds || [documentId], model, geminiApiKey, supabase, includeTranscription);
+      } else if (operation === 'extractData') {
+        result = await extractData(documentId, schemaId, model, geminiApiKey, supabase, includeImages);
+      } else {
+        throw new Error(`Unsupported operation: ${operation}`);
+      }
+
+      // Log completion of operation
+      if (documentId) {
+        await supabase
+          .from('processing_logs')
+          .insert({
+            document_id: documentId,
+            action: `Gemini ${operation}`,
+            status: 'success',
+            message: `Completed ${operation} operation`
+          });
+      }
+
+      return new Response(
+        JSON.stringify({ 
+          success: true, 
+          result,
+          operation,
+          documentId,
+          schemaId: result?.id || schemaId
+        }),
+        { 
+          headers: { 
+            ...corsHeaders, 
+            'Content-Type': 'application/json' 
+          } 
+        }
+      );
+    } catch (operationError) {
+      console.error(`Error in ${operation} operation:`, operationError);
+      
+      // Log error
+      if (documentId) {
+        await supabase
+          .from('processing_logs')
+          .insert({
+            document_id: documentId,
+            action: `Gemini ${operation}`,
+            status: 'error',
+            message: operationError.message || `Error in ${operation} operation`
+          });
+      }
+      
+      throw operationError;
     }
   } catch (error) {
-    console.error("Error in process-document function:", error);
-    return responseWithCors({
-      success: false,
-      error: `Server error: ${error.message || "Unknown error"}`
-    }, 500);
+    console.error("Error processing document:", error);
+    
+    return new Response(
+      JSON.stringify({ 
+        success: false, 
+        error: error.message || "An unknown error occurred"
+      }),
+      { 
+        headers: { 
+          ...corsHeaders, 
+          'Content-Type': 'application/json' 
+        },
+        status: 500
+      }
+    );
   }
 });
 
-async function generateSchema(supabase: any, documentIds: string[]) {
-  if (!documentIds || documentIds.length === 0) {
-    return responseWithCors({
-      success: false,
-      error: "No documents provided for schema generation"
-    }, 400);
+async function transcribeDocument(documentId: string, model: string, apiKey: string, supabase: any, includeImages: boolean, customPrompt?: string) {
+  console.log(`Transcribing document ${documentId} with model ${model}`);
+  
+  // Get document information
+  const { data: document, error: docError } = await supabase
+    .from('documents')
+    .select('*')
+    .eq('id', documentId)
+    .single();
+  
+  if (docError || !document) {
+    throw new Error(`Document not found: ${docError?.message || 'Unknown error'}`);
   }
+  
+  let context = "";
+  let imageUrls: string[] = [];
+  
+  // Get document pages for images if needed
+  if (includeImages) {
+    const { data: pages, error: pagesError } = await supabase
+      .from('document_pages')
+      .select('*')
+      .eq('document_id', documentId)
+      .order('page_number', { ascending: true });
+    
+    if (pagesError) {
+      console.error("Error fetching document pages:", pagesError);
+    } else if (pages && pages.length > 0) {
+      // Add page images to context
+      imageUrls = pages.map(page => page.image_url).filter(Boolean);
+      console.log(`Found ${imageUrls.length} page images for document ${documentId}`);
+    }
+  }
+  
+  // Build the prompt
+  const systemPrompt = customPrompt || `Please carefully examine the provided document images. This is a document that contains important information. 
+    
+Transcribe ALL the text content from these images into a clear, well-formatted markdown document. 
+    
+Important instructions:
+1. Maintain the original structure of the document as much as possible.
+2. Use headers (## and ###) to represent section titles and subtitles.
+3. Use lists (- or numbered) for items that appear in list format.
+4. Preserve the relationships between questions and answers.
+5. If handwriting is unclear, indicate with [illegible] but make your best guess if possible.
+6. Include ALL text content, including headers, footers, and any notes.
+7. Properly format any tables you find using markdown table syntax.
 
+The output should be a complete, accurate transcription that could be used as a text-only reference for the original document.`;
+
+  console.log("Sending transcription request to Gemini API", {
+    modelUsed: model, 
+    pageCount: imageUrls.length, 
+    documentName: document.name
+  });
+  
   try {
-    console.log(`Generating schema for documents: ${documentIds.join(', ')}`);
+    const startTime = Date.now();
     
-    // Fetch document data
-    const { data: documents, error: documentsError } = await supabase
-      .from('documents')
-      .select('id, name, transcription')
-      .in('id', documentIds)
-      .order('created_at', { ascending: false });
+    // Prepare request payload
+    const payload: any = {
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { text: systemPrompt }
+          ]
+        }
+      ],
+      generation_config: {
+        temperature: 0.1,
+        top_p: 0.95,
+        top_k: 40,
+        max_output_tokens: 4096,
+      }
+    };
     
-    if (documentsError) {
-      console.error("Error fetching documents:", documentsError);
-      return responseWithCors({
-        success: false,
-        error: `Failed to fetch documents: ${documentsError.message}`
-      }, 500);
-    }
-    
-    if (!documents || documents.length === 0) {
-      return responseWithCors({
-        success: false,
-        error: "No documents found with the provided IDs"
-      }, 404);
-    }
-    
-    // Combine all document transcriptions
-    const combinedText = documents
-      .map(doc => doc.transcription)
-      .filter(text => text && text.trim().length > 0)
-      .join("\n\n");
-    
-    if (!combinedText || combinedText.trim().length === 0) {
-      return responseWithCors({
-        success: false,
-        error: "No text content found in the provided documents"
-      }, 400);
-    }
-
-    // Generate schema from text using Gemini API
-    const apiKey = Deno.env.get('GEMINI_API_KEY');
-    if (!apiKey) {
-      return responseWithCors({
-        success: false,
-        error: "Server configuration error: Missing Gemini API key"
-      }, 500);
-    }
-
-    // Prepare the prompt for Gemini
-    const modelName = "gemini-1.5-pro-latest";
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-    
-    const documentDescriptions = documents.map(doc => `- "${doc.name}": ${doc.transcription ? doc.transcription.substring(0, 200) + "..." : "No transcription available"}`).join("\n");
-    
-    const prompt = `
-    You are a document schema analyzer. Given the transcribed content of documents, create a structured schema that represents the data in these documents.
-    
-    Documents:
-    ${documentDescriptions}
-    
-    Your task is to analyze the document content and generate a JSON schema that represents the structured data within these documents.
-    The schema should have the following structure:
-    {
-      "schema": {
-        "name": "A descriptive name for the schema",
-        "description": "A brief description of what this schema represents",
-        "tables": [
-          {
-            "name": "Table name (e.g., 'Customer Information')",
-            "description": "What this table represents",
-            "fields": [
-              {
-                "name": "Field name (e.g., 'customer_name')",
-                "description": "What this field represents",
-                "type": "string|number|date|boolean",
-                "required": true/false
-              }
-            ]
+    // Add images to the parts if available
+    if (imageUrls.length > 0) {
+      for (const imageUrl of imageUrls) {
+        try {
+          // Fetch the image and convert to base64
+          const imageResponse = await fetch(imageUrl);
+          if (!imageResponse.ok) {
+            console.error(`Failed to fetch image: ${imageUrl}`, imageResponse.status);
+            continue;
           }
-        ],
-        "rationale": "Explanation of why you structured the schema this way",
-        "suggestions": [
-          {
-            "description": "Suggestion for improvement",
-            "type": "add|modify|remove",
-            "impact": "low|medium|high"
-          }
-        ]
+          
+          const imageArrayBuffer = await imageResponse.arrayBuffer();
+          const base64 = btoa(String.fromCharCode(...new Uint8Array(imageArrayBuffer)));
+          const mimeType = imageResponse.headers.get('content-type') || 'image/jpeg';
+          
+          payload.contents[0].parts.push({
+            inline_data: {
+              mime_type: mimeType,
+              data: base64
+            }
+          });
+          
+          console.log(`Added image to request: ${imageUrl}`);
+        } catch (imageError) {
+          console.error(`Error processing image ${imageUrl}:`, imageError);
+        }
       }
     }
     
-    Only respond with the valid JSON object, nothing else.
-    `;
-
     // Call Gemini API
-    const response = await fetch(endpoint, {
-      method: "POST",
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+      method: 'POST',
       headers: {
-        "Content-Type": "application/json"
+        'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              {
-                text: prompt
-              }
-            ]
-          }
-        ],
-        generationConfig: {
-          temperature: 0.2,
-          topP: 0.8,
-          topK: 40,
-          maxOutputTokens: 8192
-        }
-      })
+      body: JSON.stringify(payload)
     });
-
+    
     if (!response.ok) {
       const errorData = await response.text();
-      console.error("Gemini API error:", errorData);
-      return responseWithCors({
-        success: false,
-        error: `Failed to generate schema: API error (${response.status})`
-      }, 500);
+      console.error("Gemini API error response:", errorData);
+      throw new Error(`Gemini API error: ${response.status} ${response.statusText}`);
     }
-
-    const geminiResponse = await response.json();
-    console.log("Gemini API response received");
     
-    if (!geminiResponse.candidates || geminiResponse.candidates.length === 0) {
-      return responseWithCors({
-        success: false,
-        error: "No results returned from Gemini API"
-      }, 500);
-    }
-
-    const content = geminiResponse.candidates[0].content;
-    if (!content || !content.parts || content.parts.length === 0) {
-      return responseWithCors({
-        success: false,
-        error: "Empty content returned from Gemini API"
-      }, 500);
-    }
-
-    const schemaText = content.parts[0].text;
-    let schemaJson;
+    const data = await response.json();
+    console.log("Gemini API response:", JSON.stringify(data).substring(0, 500) + "...");
     
-    try {
-      // Extract JSON from the text (in case there's any extra text)
-      const jsonMatch = schemaText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        schemaJson = JSON.parse(jsonMatch[0]);
-      } else {
-        schemaJson = JSON.parse(schemaText);
-      }
-    } catch (parseError) {
-      console.error("Error parsing schema JSON:", parseError);
-      return responseWithCors({
-        success: false,
-        error: `Failed to parse schema: ${parseError.message}`
-      }, 500);
+    if (!data.candidates || data.candidates.length === 0) {
+      throw new Error("No response from Gemini API");
     }
-
-    // Save the schema to the database
-    const { data: schemaData, error: schemaError } = await supabase
-      .from('document_schemas')
-      .insert({
-        name: schemaJson.schema?.name || `Schema for ${documents.length} document(s)`,
-        description: schemaJson.schema?.description || "Automatically generated schema",
-        structure: schemaJson.schema?.tables || [],
-        rationale: schemaJson.schema?.rationale || "",
-        suggestions: schemaJson.schema?.suggestions || [],
+    
+    // Extract transcription from response
+    const transcription = data.candidates[0].content.parts.map((part: any) => part.text).join("\n");
+    const processingTime = Date.now() - startTime;
+    
+    console.log(`Transcription completed in ${processingTime}ms`);
+    
+    // Update document with transcription
+    const { error: updateError } = await supabase
+      .from('documents')
+      .update({
+        transcription: transcription,
+        updated_at: new Date().toISOString()
       })
-      .select()
-      .single();
+      .eq('id', documentId);
     
-    if (schemaError) {
-      console.error("Error saving schema:", schemaError);
-      return responseWithCors({
-        success: false,
-        error: `Failed to save schema: ${schemaError.message}`
-      }, 500);
+    if (updateError) {
+      console.error("Error updating document with transcription:", updateError);
     }
-
-    // Log success for each document
-    for (const docId of documentIds) {
-      await supabase.from('processing_logs').insert({
-        document_id: docId,
-        action: 'Schema Generation',
-        status: 'success',
-        message: `Generated schema: ${schemaJson.schema?.name || "Unnamed schema"}`
-      });
-    }
-
-    return responseWithCors({
-      success: true,
-      result: schemaJson,
-      schemaId: schemaData.id
-    });
+    
+    return {
+      transcription: transcription,
+      processingTime: `${processingTime}ms`
+    };
   } catch (error) {
-    console.error("Error in generateSchema:", error);
-    
-    // Log error for each document
-    for (const docId of documentIds) {
-      await supabase.from('processing_logs').insert({
-        document_id: docId,
-        action: 'Schema Generation Error',
-        status: 'error',
-        message: error.message || "Unknown error in schema generation"
-      });
-    }
-    
-    return responseWithCors({
-      success: false,
-      error: `Error generating schema: ${error.message || "Unknown error"}`
-    }, 500);
+    console.error("Error in transcribeDocument:", error);
+    throw error;
   }
 }
 
-async function extractData(supabase: any, documentId: string, schemaId: string) {
-  if (!documentId) {
-    return responseWithCors({
-      success: false,
-      error: "Missing required parameter: documentId"
-    }, 400);
+async function generateSchema(documentIds: string[], model: string, apiKey: string, supabase: any, includeTranscription: boolean) {
+  console.log(`Generating schema for documents: ${documentIds.join(", ")}`);
+  
+  if (!documentIds.length) {
+    throw new Error("No document IDs provided");
   }
-
-  if (!schemaId) {
-    return responseWithCors({
-      success: false,
-      error: "Missing required parameter: schemaId"
-    }, 400);
+  
+  // Collect document information
+  const { data: documents, error: docsError } = await supabase
+    .from('documents')
+    .select('*')
+    .in('id', documentIds);
+  
+  if (docsError) {
+    throw new Error(`Error fetching documents: ${docsError.message}`);
   }
-
-  try {
-    console.log(`Extracting data for document ${documentId} using schema ${schemaId}`);
-    
-    // Fetch document data
-    const { data: document, error: documentError } = await supabase
-      .from('documents')
-      .select('id, name, transcription')
-      .eq('id', documentId)
-      .single();
-    
-    if (documentError) {
-      console.error("Error fetching document:", documentError);
-      return responseWithCors({
-        success: false,
-        error: `Failed to fetch document: ${documentError.message}`
-      }, 500);
-    }
-    
-    if (!document) {
-      return responseWithCors({
-        success: false,
-        error: "Document not found"
-      }, 404);
-    }
-    
-    if (!document.transcription) {
-      return responseWithCors({
-        success: false,
-        error: "Document has no transcription"
-      }, 400);
-    }
-
-    // Fetch schema data
-    const { data: schema, error: schemaError } = await supabase
-      .from('document_schemas')
-      .select('id, name, structure')
-      .eq('id', schemaId)
-      .single();
-    
-    if (schemaError) {
-      console.error("Error fetching schema:", schemaError);
-      return responseWithCors({
-        success: false,
-        error: `Failed to fetch schema: ${schemaError.message}`
-      }, 500);
-    }
-    
-    if (!schema) {
-      return responseWithCors({
-        success: false,
-        error: "Schema not found"
-      }, 404);
-    }
-
-    // Extract data using Gemini API
-    const apiKey = Deno.env.get('GEMINI_API_KEY');
-    if (!apiKey) {
-      return responseWithCors({
-        success: false,
-        error: "Server configuration error: Missing Gemini API key"
-      }, 500);
-    }
-
-    // Prepare the prompt for Gemini
-    const modelName = "gemini-1.5-pro-latest";
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-    
-    // Create prompt with schema structure and document content
-    const schemaStructure = JSON.stringify(schema.structure, null, 2);
-    
-    const prompt = `
-    You are a document data extractor. Given a document's text and a schema structure, extract the relevant data according to the schema.
-    
-    DOCUMENT NAME: ${document.name}
-    
-    DOCUMENT TEXT:
-    ${document.transcription.substring(0, 15000)} ${document.transcription.length > 15000 ? '... (truncated)' : ''}
-    
-    SCHEMA STRUCTURE:
-    ${schemaStructure}
-    
-    Extract the relevant data from the document according to the schema structure. For each table and field in the schema, 
-    find the corresponding values in the document. If a value can't be found, leave it as null or indicate that it's missing.
-    
-    Return the extracted data in the following JSON format:
-    {
-      "extraction": {
-        "tableName1": {
-          "fieldName1": "extracted value",
-          "fieldName2": "extracted value"
-        },
-        "tableName2": {
-          "fieldName1": "extracted value",
-          "fieldName2": "extracted value"
-        }
-      },
-      "confidence": 0.85,
-      "missing_fields": ["tableName1.fieldName3", "tableName2.fieldName1"]
-    }
-    
-    Only respond with the valid JSON object, nothing else.
-    `;
-
-    // Call Gemini API
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              {
-                text: prompt
-              }
-            ]
-          }
-        ],
-        generationConfig: {
-          temperature: 0.2,
-          topP: 0.8,
-          topK: 40,
-          maxOutputTokens: 8192
-        }
-      })
+  
+  if (!documents || documents.length === 0) {
+    throw new Error("No documents found");
+  }
+  
+  console.log(`Found ${documents.length} documents for schema generation`);
+  
+  // Prepare context with document transcriptions
+  let context = "";
+  
+  if (includeTranscription) {
+    // Collect transcriptions from documents
+    documents.forEach((doc: any, index: number) => {
+      if (doc.transcription) {
+        context += `DOCUMENT ${index + 1}: ${doc.name}\n\n${doc.transcription}\n\n---\n\n`;
+      }
     });
+  }
+  
+  // Build the prompt
+  const prompt = `Analyze the provided transcriptions of documents. I need you to design a data schema that can efficiently capture ALL information from these documents. 
 
+Create a structured schema with tables and fields that would work for extracting data from these and similar documents.
+
+Important requirements:
+1. Each logical section of the documents should be a separate table.
+2. Fields should capture specific data points with appropriate types (string, number, boolean, date, enum).
+3. Mark fields as required when they are critical for the document's purpose.
+4. Include a rationale explaining your design decisions.
+5. Suggest 3-5 potential improvements to make the schema more robust.
+
+Return your response as a JSON object with this structure:
+{
+  "schema": {
+    "name": "Schema name",
+    "description": "Brief description",
+    "tables": [
+      {
+        "name": "TableName",
+        "description": "Table purpose",
+        "fields": [
+          { 
+            "name": "FieldName", 
+            "type": "string|number|boolean|date|enum", 
+            "required": true|false,
+            "enumValues": ["value1", "value2"] // Only for enum types
+          }
+        ]
+      }
+    ],
+    "rationale": "Detailed explanation of schema design choices",
+    "suggestions": [
+      {
+        "description": "Suggestion description",
+        "type": "add|modify|remove",
+        "impact": "Explanation of the benefit"
+      }
+    ]
+  }
+}`;
+
+  // Call Gemini API
+  const payload = {
+    contents: [
+      {
+        role: "user",
+        parts: []
+      }
+    ],
+    generation_config: {
+      temperature: 0.2,
+      top_p: 0.95,
+      top_k: 40,
+      max_output_tokens: 8192,
+    }
+  };
+  
+  if (context) {
+    payload.contents[0].parts.push({ text: context });
+  }
+  
+  payload.contents[0].parts.push({ text: prompt });
+  
+  try {
+    console.log("Sending schema generation request to Gemini API");
+    
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload)
+    });
+    
     if (!response.ok) {
       const errorData = await response.text();
-      console.error("Gemini API error:", errorData);
-      return responseWithCors({
-        success: false,
-        error: `Failed to extract data: API error (${response.status})`
-      }, 500);
+      console.error("Gemini API error response:", errorData);
+      throw new Error(`Gemini API error: ${response.status} ${response.statusText}`);
     }
-
-    const geminiResponse = await response.json();
-    console.log("Gemini API response received for data extraction");
     
-    if (!geminiResponse.candidates || geminiResponse.candidates.length === 0) {
-      return responseWithCors({
-        success: false,
-        error: "No results returned from Gemini API"
-      }, 500);
-    }
-
-    const content = geminiResponse.candidates[0].content;
-    if (!content || !content.parts || content.parts.length === 0) {
-      return responseWithCors({
-        success: false,
-        error: "Empty content returned from Gemini API"
-      }, 500);
-    }
-
-    const extractionText = content.parts[0].text;
-    let extractionJson;
+    const data = await response.json();
     
+    if (!data.candidates || data.candidates.length === 0) {
+      throw new Error("No response from Gemini API");
+    }
+    
+    // Extract schema from response
+    const schemaText = data.candidates[0].content.parts.map((part: any) => part.text).join("\n");
+    
+    // Parse schema JSON
+    let schema;
     try {
-      // Extract JSON from the text (in case there's any extra text)
-      const jsonMatch = extractionText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        extractionJson = JSON.parse(jsonMatch[0]);
-      } else {
-        extractionJson = JSON.parse(extractionText);
-      }
+      const jsonMatch = schemaText.match(/```json\s*([\s\S]*?)\s*```|({[\s\S]*})/);
+      const jsonStr = jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : schemaText;
+      schema = JSON.parse(jsonStr.replace(/```json|```/g, '').trim());
     } catch (parseError) {
-      console.error("Error parsing extraction JSON:", parseError);
-      return responseWithCors({
-        success: false,
-        error: `Failed to parse extraction: ${parseError.message}`
-      }, 500);
+      console.error("Error parsing schema JSON:", parseError);
+      console.log("Raw schema text:", schemaText);
+      throw new Error("Failed to parse schema JSON from Gemini response");
     }
+    
+    // Store schema in database
+    const schemaId = crypto.randomUUID();
+    const { error: insertError } = await supabase
+      .from('document_schemas')
+      .insert({
+        id: schemaId,
+        name: schema.schema?.name || `Schema for ${documents.length} document(s)`,
+        description: schema.schema?.description || "Automatically generated schema",
+        structure: schema.schema?.tables || [],
+        rationale: schema.schema?.rationale || "",
+        suggestions: schema.schema?.suggestions || [],
+        organization_id: documents[0].organization_id || documents[0].user_id
+      });
+    
+    if (insertError) {
+      console.error("Error storing schema:", insertError);
+    }
+    
+    return {
+      ...schema,
+      id: schemaId
+    };
+  } catch (error) {
+    console.error("Error in generateSchema:", error);
+    throw error;
+  }
+}
 
-    // Save extracted data to the database
-    if (extractionJson.extraction) {
-      for (const [tableName, tableData] of Object.entries(extractionJson.extraction)) {
-        for (const [fieldName, fieldValue] of Object.entries(tableData)) {
-          if (fieldValue !== null && fieldValue !== undefined) {
-            await supabase.from('document_data').insert({
-              document_id: documentId,
-              table_id: tableName,
-              field_id: fieldName,
-              value: String(fieldValue),
-              confidence: extractionJson.confidence || 0.5
-            });
+async function extractData(documentId: string, schemaId: string, model: string, apiKey: string, supabase: any, includeImages: boolean) {
+  console.log(`Extracting data from document ${documentId} using schema ${schemaId}`);
+  
+  // Get document information
+  const { data: document, error: docError } = await supabase
+    .from('documents')
+    .select('*')
+    .eq('id', documentId)
+    .single();
+  
+  if (docError || !document) {
+    throw new Error(`Document not found: ${docError?.message || 'Unknown error'}`);
+  }
+  
+  // Get schema information
+  const { data: schema, error: schemaError } = await supabase
+    .from('document_schemas')
+    .select('*')
+    .eq('id', schemaId)
+    .single();
+  
+  if (schemaError || !schema) {
+    throw new Error(`Schema not found: ${schemaError?.message || 'Unknown error'}`);
+  }
+  
+  let imageUrls: string[] = [];
+  
+  // Get document pages for images if needed
+  if (includeImages) {
+    const { data: pages, error: pagesError } = await supabase
+      .from('document_pages')
+      .select('*')
+      .eq('document_id', documentId)
+      .order('page_number', { ascending: true });
+    
+    if (pagesError) {
+      console.error("Error fetching document pages:", pagesError);
+    } else if (pages && pages.length > 0) {
+      // Add page images to context
+      imageUrls = pages.map(page => page.image_url).filter(Boolean);
+    }
+  }
+  
+  // Build the prompt
+  const prompt = `Extract structured data from the provided document images according to the following schema. 
+
+Schema structure:
+${JSON.stringify(schema.structure, null, 2)}
+
+Instructions:
+1. Extract all relevant data from the document that matches the schema.
+2. For each field in each table, provide the corresponding value from the document.
+3. If a piece of information is not present in the document, use null.
+4. If handwriting is unclear, make your best guess and indicate confidence level.
+5. Return data in a structured JSON format matching the schema tables and fields.
+
+Return your response as a JSON object with this structure:
+{
+  "extractedData": {
+    "TableName1": {
+      "FieldName1": "extracted value",
+      "FieldName2": "extracted value"
+    },
+    "TableName2": {
+      "FieldName1": "extracted value",
+      "FieldName2": "extracted value"
+    }
+  },
+  "confidence": 0.95, // Overall confidence in extraction accuracy (0-1)
+  "processingTime": "X seconds"
+}`;
+
+  try {
+    const startTime = Date.now();
+    
+    // Prepare request payload
+    const payload: any = {
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { text: prompt }
+          ]
+        }
+      ],
+      generation_config: {
+        temperature: 0.1,
+        top_p: 0.95,
+        top_k: 40,
+        max_output_tokens: 8192,
+      }
+    };
+    
+    // Add images to the parts if available
+    if (imageUrls.length > 0) {
+      for (const imageUrl of imageUrls) {
+        try {
+          // Fetch the image and convert to base64
+          const imageResponse = await fetch(imageUrl);
+          if (!imageResponse.ok) {
+            console.error(`Failed to fetch image: ${imageUrl}`, imageResponse.status);
+            continue;
           }
+          
+          const imageArrayBuffer = await imageResponse.arrayBuffer();
+          const base64 = btoa(String.fromCharCode(...new Uint8Array(imageArrayBuffer)));
+          const mimeType = imageResponse.headers.get('content-type') || 'image/jpeg';
+          
+          payload.contents[0].parts.push({
+            inline_data: {
+              mime_type: mimeType,
+              data: base64
+            }
+          });
+        } catch (imageError) {
+          console.error(`Error processing image ${imageUrl}:`, imageError);
         }
       }
     }
-
-    // Log success
-    await supabase.from('processing_logs').insert({
-      document_id: documentId,
-      action: 'Data Extraction',
-      status: 'success',
-      message: `Extracted data using schema: ${schema.name}`
+    
+    // Call Gemini API
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload)
     });
-
-    return responseWithCors({
-      success: true,
-      result: extractionJson
-    });
+    
+    if (!response.ok) {
+      const errorData = await response.text();
+      console.error("Gemini API error response:", errorData);
+      throw new Error(`Gemini API error: ${response.status} ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    
+    if (!data.candidates || data.candidates.length === 0) {
+      throw new Error("No response from Gemini API");
+    }
+    
+    // Extract extraction data from response
+    const extractionText = data.candidates[0].content.parts.map((part: any) => part.text).join("\n");
+    const processingTime = Date.now() - startTime;
+    
+    // Parse extraction JSON
+    let extractedData;
+    try {
+      const jsonMatch = extractionText.match(/```json\s*([\s\S]*?)\s*```|({[\s\S]*})/);
+      const jsonStr = jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : extractionText;
+      extractedData = JSON.parse(jsonStr.replace(/```json|```/g, '').trim());
+    } catch (parseError) {
+      console.error("Error parsing extraction JSON:", parseError);
+      console.log("Raw extraction text:", extractionText);
+      throw new Error("Failed to parse extraction JSON from Gemini response");
+    }
+    
+    // Store extracted data in database
+    if (extractedData.extractedData) {
+      // Extract data for storage
+      const dataToStore = [];
+      
+      for (const [tableName, fields] of Object.entries(extractedData.extractedData)) {
+        const tableObj = schema.structure.find((t: any) => t.name === tableName);
+        if (!tableObj) continue;
+        
+        for (const [fieldName, value] of Object.entries(fields as Record<string, any>)) {
+          const fieldObj = tableObj.fields.find((f: any) => f.name === fieldName);
+          if (!fieldObj) continue;
+          
+          dataToStore.push({
+            document_id: documentId,
+            table_id: tableObj.id,
+            field_id: fieldObj.id,
+            value: String(value),
+            confidence: extractedData.confidence || 0.9
+          });
+        }
+      }
+      
+      // Store data
+      if (dataToStore.length > 0) {
+        // Clear any existing data for this document
+        await supabase
+          .from('document_data')
+          .delete()
+          .eq('document_id', documentId);
+        
+        // Insert new data
+        const { error: insertError } = await supabase
+          .from('document_data')
+          .insert(dataToStore);
+        
+        if (insertError) {
+          console.error("Error storing extracted data:", insertError);
+        }
+      }
+    }
+    
+    return {
+      ...extractedData,
+      processingTime: `${processingTime}ms`
+    };
   } catch (error) {
     console.error("Error in extractData:", error);
-    
-    // Log error
-    await supabase.from('processing_logs').insert({
-      document_id: documentId,
-      action: 'Data Extraction Error',
-      status: 'error',
-      message: error.message || "Unknown error in data extraction"
-    });
-    
-    return responseWithCors({
-      success: false,
-      error: `Error extracting data: ${error.message || "Unknown error"}`
-    }, 500);
+    throw error;
   }
 }

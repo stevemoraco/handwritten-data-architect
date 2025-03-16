@@ -166,8 +166,16 @@ serve(async (req) => {
         .delete()
         .eq('document_id', documentId);
       
-      // Create document pages with placeholder thumbnails
+      // Create document pages with actual image data
       const thumbnails = [];
+      let pageContent = '';
+      
+      // Extract text content for transcription
+      const textContent = pdfText
+        .replace(/^\s*\d+\s*$/gm, '') // Remove page numbers
+        .replace(/[\r\n]+/g, '\n')    // Normalize line endings
+        .replace(/[^\x20-\x7E\n]/g, '') // Keep only printable ASCII and newlines
+        .trim();
       
       for (let i = 0; i < estimatedPageCount; i++) {
         // Update progress in the document record
@@ -182,43 +190,112 @@ serve(async (req) => {
         const pageNumber = i + 1;
         
         // Extract a portion of text for this page
-        const pageSize = Math.floor(pdfText.length / estimatedPageCount);
+        const pageSize = Math.floor(textContent.length / estimatedPageCount);
         const startIdx = i * pageSize;
         const endIdx = startIdx + pageSize;
-        const pageText = pdfText.substring(startIdx, endIdx);
+        pageContent = textContent.substring(startIdx, endIdx);
         
-        // Generate a placeholder page preview
-        // In this example we're using placehold.co directly so we don't need to handle image storage
-        const thumbnailUrl = `https://placehold.co/800x1100/f5f5f5/333333?text=Page+${pageNumber}`;
+        // Generate actual JPG image for the page (we'll use canvas in a real implementation)
+        // For this example, we'll create JPG data using a basic approach
         
-        console.log(`Creating page ${pageNumber} with thumbnail: ${thumbnailUrl}`);
+        // Create path for the page image
+        const pageImagePath = `${userId}/${documentId}/page_${pageNumber}.jpg`;
         
-        // Store page info in database
-        const { data: pageData, error: pageError } = await supabase
-          .from('document_pages')
-          .insert({
-            document_id: documentId,
-            page_number: pageNumber,
-            image_url: thumbnailUrl,
-            text_content: pageText.substring(0, 1000) // Limit text to avoid database size issues
-          })
-          .select()
-          .single();
+        // Create JPG data - here we're generating a simple colored canvas with page number
+        // In a real implementation, you would use a PDF rendering library like pdf.js
+        const width = 800;
+        const height = 1100;
         
-        if (pageError) {
-          console.error(`Error storing page ${pageNumber}:`, pageError);
+        // Create a canvas and draw a simple representation of a page
+        const canvas = new OffscreenCanvas(width, height);
+        const ctx = canvas.getContext('2d');
+        
+        if (ctx) {
+          // Fill background
+          ctx.fillStyle = '#f5f5f5';
+          ctx.fillRect(0, 0, width, height);
+          
+          // Add border
+          ctx.strokeStyle = '#ddd';
+          ctx.lineWidth = 4;
+          ctx.strokeRect(10, 10, width - 20, height - 20);
+          
+          // Add page number
+          ctx.fillStyle = '#333';
+          ctx.font = 'bold 40px Arial';
+          ctx.textAlign = 'center';
+          ctx.fillText(`Page ${pageNumber}`, width / 2, 80);
+          
+          // Add some lines to simulate text
+          ctx.font = '16px Arial';
+          ctx.textAlign = 'left';
+          
+          // Add some text content (simplified)
+          if (pageContent) {
+            const lines = pageContent.split('\n').slice(0, 30); // Limit to avoid too much text
+            let y = 150;
+            for (const line of lines) {
+              if (line.trim()) {
+                ctx.fillText(line.substring(0, 80), 50, y); // Limit line length
+                y += 25;
+                if (y > height - 100) break; // Don't overflow the page
+              }
+            }
+          }
+          
+          // Convert canvas to JPG
+          const jpgBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.8 });
+          const jpgArrayBuffer = await jpgBlob.arrayBuffer();
+          
+          // Upload JPG to storage
+          const { data: uploadData, error: uploadError } = await supabase
+            .storage
+            .from('document_files')
+            .upload(pageImagePath, jpgArrayBuffer, {
+              contentType: 'image/jpeg',
+              upsert: true
+            });
+          
+          if (uploadError) {
+            console.error(`Error uploading page ${pageNumber} image:`, uploadError);
+          } else {
+            console.log(`Successfully uploaded page ${pageNumber} image`);
+            
+            // Get public URL for the uploaded image
+            const { data: publicUrlData } = supabase
+              .storage
+              .from('document_files')
+              .getPublicUrl(pageImagePath);
+            
+            const imageUrl = publicUrlData.publicUrl;
+            
+            // Store page info in database
+            try {
+              const { data: pageData, error: pageError } = await supabase
+                .from('document_pages')
+                .insert({
+                  document_id: documentId,
+                  page_number: pageNumber,
+                  image_url: imageUrl,
+                  text_content: pageContent.substring(0, 1000) // Limit text to avoid database size issues
+                })
+                .select()
+                .single();
+              
+              if (pageError) {
+                console.error(`Error storing page ${pageNumber}:`, pageError);
+              } else {
+                thumbnails.push(pageData.image_url);
+                console.log(`Successfully stored page ${pageNumber} with ID: ${pageData.id}`);
+              }
+            } catch (pageInsertError) {
+              console.error(`Error inserting page ${pageNumber}:`, pageInsertError);
+            }
+          }
         } else {
-          thumbnails.push(pageData.image_url);
-          console.log(`Successfully stored page ${pageNumber} with ID: ${pageData.id}`);
+          console.error("Could not get canvas context");
         }
       }
-
-      // Extract text content from the PDF for transcription
-      const textContent = pdfText
-        .replace(/^\s*\d+\s*$/gm, '') // Remove page numbers
-        .replace(/[\r\n]+/g, '\n')    // Normalize line endings
-        .replace(/[^\x20-\x7E\n]/g, '') // Keep only printable ASCII and newlines
-        .trim();
 
       // Update document with page count and status
       await supabase
@@ -227,7 +304,7 @@ serve(async (req) => {
           status: 'processed',
           page_count: estimatedPageCount,
           processing_progress: 100,
-          transcription: textContent,
+          transcription: textContent.substring(0, 5000), // Store a preview of the text content
           processing_error: null
         })
         .eq('id', documentId);
