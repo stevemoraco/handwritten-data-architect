@@ -5,10 +5,25 @@ import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { FileText, ArrowRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { LoginModal } from "@/components/auth/LoginModal";
 
 export default function Index() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [showLoginModal, setShowLoginModal] = React.useState(false);
+  
+  const handleStartProcessing = () => {
+    if (!user) {
+      setShowLoginModal(true);
+    } else {
+      navigate("/process");
+    }
+  };
+  
+  const handleLoginComplete = () => {
+    setShowLoginModal(false);
+    navigate("/process");
+  };
   
   return (
     <div className="py-6">
@@ -28,7 +43,7 @@ export default function Index() {
               <Button 
                 size="lg" 
                 className="gap-2"
-                onClick={() => navigate("/process")}
+                onClick={handleStartProcessing}
               >
                 <FileText className="h-5 w-5" />
                 Start Processing
@@ -41,6 +56,13 @@ export default function Index() {
           </div>
         </div>
       </div>
+
+      {/* Login modal */}
+      <LoginModal 
+        open={showLoginModal} 
+        onOpenChange={setShowLoginModal} 
+        onComplete={handleLoginComplete}
+      />
     </div>
   );
 }

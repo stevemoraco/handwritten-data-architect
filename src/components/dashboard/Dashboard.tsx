@@ -7,10 +7,14 @@ import { File, Plus, FileText, Layers, ArrowRight } from "lucide-react";
 import { useDocuments } from "@/context/DocumentContext";
 import { DocumentCard } from "@/components/document/DocumentCard";
 import { Empty } from "@/components/ui/empty";
+import { useAuth } from "@/context/AuthContext";
+import { LoginModal } from "@/components/auth/LoginModal";
 
 export function Dashboard() {
   const navigate = useNavigate();
   const { documents, schemas } = useDocuments();
+  const { user } = useAuth();
+  const [showLoginModal, setShowLoginModal] = React.useState(false);
   
   // Sort documents by createdAt date, newest first
   const recentDocuments = [...documents]
@@ -18,6 +22,15 @@ export function Dashboard() {
     .slice(0, 3);
     
   const handleStartProcessing = () => {
+    if (!user) {
+      setShowLoginModal(true);
+    } else {
+      navigate("/process");
+    }
+  };
+  
+  const handleLoginComplete = () => {
+    setShowLoginModal(false);
     navigate("/process");
   };
   
@@ -138,6 +151,13 @@ export function Dashboard() {
           </Button>
         </CardFooter>
       </Card>
+
+      {/* Login modal */}
+      <LoginModal 
+        open={showLoginModal} 
+        onOpenChange={setShowLoginModal} 
+        onComplete={handleLoginComplete}
+      />
     </div>
   );
 }
