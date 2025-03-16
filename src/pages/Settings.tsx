@@ -1,4 +1,3 @@
-
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { 
@@ -40,10 +39,14 @@ export default function Settings() {
       // Load user profile data
       setEmail(user.email || "");
       
-      // Try to extract name from user metadata or email
-      // Using optional chaining to fix TypeScript errors
-      const displayName = user.user_metadata?.full_name || 
-                         user.user_metadata?.name || 
+      // Try to extract name from session user metadata or email
+      // Access the raw Supabase user object from AuthContext if available
+      // This is a workaround since user_metadata isn't in our User type
+      const supabaseUser = (user as any)._supabaseUser;
+      const userMetadata = supabaseUser?.user_metadata;
+      
+      const displayName = userMetadata?.full_name || 
+                         userMetadata?.name || 
                          email.split('@')[0];
       
       setName(displayName || "");
