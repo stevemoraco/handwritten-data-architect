@@ -322,7 +322,7 @@ Regular Security Audits: Conduct regular security audits to identify and address
 
 CORS: The CORS headers are correctly set up in the Supabase Edge Functions. Make sure to configure these appropriately for your deployment environment.
 
-Future Enhancements
+# Future Enhancements
 
 Full Gemini API Integration: Replace the mock Gemini API calls with actual API calls.
 
