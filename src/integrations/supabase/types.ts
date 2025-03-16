@@ -9,7 +9,121 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
-      [_ in never]: never
+      document_pages: {
+        Row: {
+          created_at: string
+          document_id: string
+          id: string
+          image_url: string | null
+          page_number: number
+          text_content: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          document_id: string
+          id?: string
+          image_url?: string | null
+          page_number: number
+          text_content?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          document_id?: string
+          id?: string
+          image_url?: string | null
+          page_number?: number
+          text_content?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "document_pages_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      documents: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          original_url: string | null
+          page_count: number | null
+          processing_error: string | null
+          size: number | null
+          status: string
+          type: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          original_url?: string | null
+          page_count?: number | null
+          processing_error?: string | null
+          size?: number | null
+          status: string
+          type: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          original_url?: string | null
+          page_count?: number | null
+          processing_error?: string | null
+          size?: number | null
+          status?: string
+          type?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      processing_logs: {
+        Row: {
+          action: string
+          created_at: string
+          document_id: string
+          id: string
+          message: string | null
+          status: string
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          document_id: string
+          id?: string
+          message?: string | null
+          status: string
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          document_id?: string
+          id?: string
+          message?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "processing_logs_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never

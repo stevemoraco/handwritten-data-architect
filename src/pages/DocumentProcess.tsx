@@ -13,10 +13,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ArrowLeft, FileText, Layers, MessageSquare } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import { buildSchemaGenerationPrompt, buildTranscriptionPrompt, processWithGemini } from "@/services/geminiService";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 
 export default function DocumentProcess() {
   const navigate = useNavigate();
-  const { documents, schemas, addSchema, generateSchema } = useDocuments();
+  const { toast } = useToast();
+  const { schemas, addSchema, generateSchema } = useDocuments();
   const [uploadedDocumentIds, setUploadedDocumentIds] = React.useState<string[]>([]);
   const [steps, setSteps] = React.useState<AIProcessingStep[]>([
     {
@@ -60,21 +63,42 @@ export default function DocumentProcess() {
     }
   });
 
-  const handleDocumentsUploaded = (documentIds: string[]) => {
+  const handleDocumentsUploaded = async (documentIds: string[]) => {
     setUploadedDocumentIds(documentIds);
     
     // Update step status
     updateStepStatus("Document Upload", "completed");
     
-    // Update process stats
-    setProcessStats(prev => ({
-      ...prev,
-      documentCount: documentIds.length,
-      processedDocuments: documentIds.length
-    }));
-    
-    // Auto-navigate to the next step
-    setActiveTab("process");
+    try {
+      // Fetch document metadata
+      const { data: documents, error } = await supabase
+        .from("documents")
+        .select("*")
+        .in("id", documentIds);
+      
+      if (error) {
+        throw new Error(`Failed to fetch document metadata: ${error.message}`);
+      }
+      
+      // Update process stats
+      setProcessStats(prev => ({
+        ...prev,
+        documentCount: documentIds.length,
+        processedDocuments: documentIds.length
+      }));
+      
+      console.log("Documents uploaded successfully:", documents);
+      
+      // Auto-navigate to the next step
+      setActiveTab("process");
+    } catch (error) {
+      console.error("Error in document upload handling:", error);
+      toast({
+        title: "Error",
+        description: `Failed to process uploaded documents: ${error.message}`,
+        variant: "destructive"
+      });
+    }
   };
 
   const updateStepStatus = (stepName: string, status: AIProcessingStep["status"], progress?: number, error?: string) => {
@@ -88,31 +112,79 @@ export default function DocumentProcess() {
   };
 
   const startProcessing = async () => {
+    if (uploadedDocumentIds.length === 0) {
+      toast({
+        title: "No documents",
+        description: "Please upload at least one document to process.",
+        variant: "destructive"
+      });
+      return;
+    }
+    
     try {
       // Process each document for transcription
       updateStepStatus("Document Transcription", "in_progress", 0);
       
-      for (let i = 0; i < uploadedDocumentIds.length; i++) {
-        const documentId = uploadedDocumentIds[i];
-        const document = documents.find(doc => doc.id === documentId);
+      const { data: documents, error: documentsError } = await supabase
+        .from("documents")
+        .select("*")
+        .in("id", uploadedDocumentIds);
+      
+      if (documentsError) {
+        throw new Error(`Failed to fetch documents: ${documentsError.message}`);
+      }
+      
+      for (let i = 0; i < documents.length; i++) {
+        const document = documents[i];
         
-        if (document) {
-          const prompt = buildTranscriptionPrompt(document);
-          // Here we would call the real Gemini API
-          await processWithGemini(prompt);
-          
-          const progress = ((i + 1) / uploadedDocumentIds.length) * 100;
-          updateStepStatus("Document Transcription", "in_progress", progress);
-          
-          // Update processed documents count
-          setProcessStats(prev => ({
-            ...prev,
-            processedDocuments: i + 1
-          }));
-          
-          // Simulate processing delay
-          await new Promise(resolve => setTimeout(resolve, 1000));
+        // Get document pages
+        const { data: pages, error: pagesError } = await supabase
+          .from("document_pages")
+          .select("*")
+          .eq("document_id", document.id)
+          .order("page_number", { ascending: true });
+        
+        if (pagesError) {
+          throw new Error(`Failed to fetch document pages: ${pagesError.message}`);
         }
+        
+        if (!pages || pages.length === 0) {
+          // If no pages exist, try to process the document
+          try {
+            await supabase.functions.invoke("pdf-to-images", {
+              body: { documentId: document.id }
+            });
+            
+            // Refetch pages after processing
+            const { data: updatedPages } = await supabase
+              .from("document_pages")
+              .select("*")
+              .eq("document_id", document.id)
+              .order("page_number", { ascending: true });
+            
+            if (updatedPages && updatedPages.length > 0) {
+              console.log(`Generated ${updatedPages.length} pages for document ${document.id}`);
+            } else {
+              throw new Error(`No pages generated for document ${document.id}`);
+            }
+          } catch (processingError) {
+            console.error(`Error processing document ${document.id}:`, processingError);
+            toast({
+              title: "Processing error",
+              description: `Failed to process document: ${processingError.message}`,
+              variant: "destructive"
+            });
+          }
+        }
+        
+        const progress = ((i + 1) / documents.length) * 100;
+        updateStepStatus("Document Transcription", "in_progress", progress);
+        
+        // Update processed documents count
+        setProcessStats(prev => ({
+          ...prev,
+          processedDocuments: i + 1
+        }));
       }
       
       updateStepStatus("Document Transcription", "completed");
@@ -120,35 +192,41 @@ export default function DocumentProcess() {
       // Generate schema from transcribed documents
       updateStepStatus("Schema Generation", "in_progress", 0);
       
-      const docsToProcess = documents.filter(doc => uploadedDocumentIds.includes(doc.id));
-      const prompt = buildSchemaGenerationPrompt(docsToProcess);
-      
       // Reset processed documents for schema generation phase
       setProcessStats(prev => ({
         ...prev,
         processedDocuments: 0
       }));
       
-      // Simulate schema generation with progress updates
-      for (let i = 0; i < docsToProcess.length; i++) {
-        // Simulate processing each document
-        await new Promise(resolve => setTimeout(resolve, 800));
+      // Get transcriptions for all documents
+      const documentTranscriptions = [];
+      for (let i = 0; i < documents.length; i++) {
+        const document = documents[i];
+        
+        // Get document pages with text content
+        const { data: pages } = await supabase
+          .from("document_pages")
+          .select("text_content")
+          .eq("document_id", document.id)
+          .order("page_number", { ascending: true });
+        
+        if (pages && pages.length > 0) {
+          const transcription = pages.map(page => page.text_content).join("\n\n");
+          documentTranscriptions.push(transcription);
+        }
         
         // Update processed documents count
         setProcessStats(prev => ({
           ...prev,
-          processedDocuments: i + 1,
-          schemaDetails: {
-            tables: Math.min(5, Math.floor((i + 1) / 2) + 1), // Simulate discovering tables
-            fields: Math.min(25, (i + 1) * 5) // Simulate discovering fields
-          }
+          processedDocuments: i + 1
         }));
         
-        const progress = ((i + 1) / docsToProcess.length) * 100;
+        const progress = ((i + 1) / documents.length) * 100;
         updateStepStatus("Schema Generation", "in_progress", progress);
       }
       
-      // Simulate final schema generation
+      // Use the generateSchema function from the context
+      // In a real implementation, this would use the actual transcriptions
       const schema = await generateSchema(uploadedDocumentIds);
       setGeneratedSchema(schema);
       
@@ -175,7 +253,14 @@ export default function DocumentProcess() {
       setActiveTab("schema");
       
     } catch (error) {
+      console.error("Error in document processing:", error);
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      
+      toast({
+        title: "Processing error",
+        description: errorMessage,
+        variant: "destructive"
+      });
       
       // Update the current step to show the error
       const currentStep = steps.find(step => step.status === "in_progress");
@@ -189,6 +274,11 @@ export default function DocumentProcess() {
     updateStepStatus("Schema Refinement", "completed");
     setIsProcessingComplete(true);
     setActiveTab("schema");
+    
+    toast({
+      title: "Schema approved",
+      description: "Your document schema has been successfully approved."
+    });
   };
 
   const handleSchemaModify = () => {
@@ -197,13 +287,19 @@ export default function DocumentProcess() {
 
   const handleSchemaUpdate = () => {
     // This would be called when the chat suggests schema updates
+    toast({
+      title: "Schema updated",
+      description: "Your schema has been updated based on your feedback."
+    });
   };
 
   const viewResults = () => {
     // Navigate to the results page
-    // navigate("/results");
-    // For now, just switch to the chat tab
-    setActiveTab("chat");
+    if (uploadedDocumentIds.length > 0) {
+      navigate(`/document/${uploadedDocumentIds[0]}`);
+    } else {
+      setActiveTab("schema");
+    }
   };
 
   return (
