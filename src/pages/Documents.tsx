@@ -3,7 +3,7 @@ import * as React from "react";
 import { useNavigate } from "react-router-dom";
 import { useDocuments } from "@/context/DocumentContext";
 import { Button } from "@/components/ui/button";
-import { PlusIcon, ArrowUpIcon, Trash2, RefreshCw } from "lucide-react";
+import { PlusIcon, ArrowUpIcon, Trash2, RefreshCw, AlertTriangle } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { SimpleDocumentList } from "@/components/document/SimpleDocumentList";
 import {
@@ -17,17 +17,33 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "@/hooks/use-toast";
+import { Card } from "@/components/ui/card";
 
 export default function Documents() {
   const navigate = useNavigate();
-  const { documents, isLoading, removeBatchDocuments, fetchUserDocuments } = useDocuments();
+  const { documents, isLoading, removeBatchDocuments, fetchUserDocuments, fetchError } = useDocuments();
   const [selectedDocumentIds, setSelectedDocumentIds] = React.useState<string[]>([]);
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
   const [isRefreshing, setIsRefreshing] = React.useState(false);
+  const [errorShown, setErrorShown] = React.useState(false);
 
   React.useEffect(() => {
-    fetchUserDocuments();
+    fetchUserDocuments().catch(err => {
+      console.error("Error in initial document fetch:", err);
+    });
   }, [fetchUserDocuments]);
+
+  // Show fetch error only once
+  React.useEffect(() => {
+    if (fetchError && !errorShown) {
+      toast({
+        title: "Connection error",
+        description: "Unable to fetch documents. Please try again later.",
+        variant: "destructive"
+      });
+      setErrorShown(true);
+    }
+  }, [fetchError, errorShown]);
 
   const handleProcessSelected = () => {
     if (selectedDocumentIds.length === 0) return;
@@ -61,6 +77,7 @@ export default function Documents() {
 
   const handleRefreshDocuments = async () => {
     setIsRefreshing(true);
+    setErrorShown(false); // Reset error state to allow showing errors again
     try {
       await fetchUserDocuments();
       toast({
@@ -117,6 +134,27 @@ export default function Documents() {
       </div>
       
       <Separator className="my-6" />
+      
+      {fetchError && !isLoading && (
+        <Card className="mb-6 p-4 bg-destructive/10 border-destructive/20">
+          <div className="flex items-center gap-2 text-destructive">
+            <AlertTriangle className="h-5 w-5" />
+            <div>
+              <h3 className="font-medium">Connection Error</h3>
+              <p className="text-sm">Could not connect to the server. Your documents may not be up-to-date.</p>
+            </div>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="ml-auto" 
+              onClick={handleRefreshDocuments}
+              disabled={isRefreshing}
+            >
+              {isRefreshing ? 'Retrying...' : 'Retry'}
+            </Button>
+          </div>
+        </Card>
+      )}
       
       <SimpleDocumentList 
         documents={documents}

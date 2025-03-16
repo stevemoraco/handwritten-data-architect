@@ -1,4 +1,3 @@
-
 import { createContext, useContext, useState, ReactNode, useEffect, useCallback } from "react";
 import { Document, DocumentSchema, ProcessingLog } from "@/types";
 import { toast } from "@/components/ui/use-toast";
@@ -10,6 +9,7 @@ interface DocumentContextProps {
   documents: Document[];
   schemas: DocumentSchema[];
   isLoading: boolean;
+  fetchError: Error | null;
   setDocuments: (documents: Document[]) => void;
   addDocument: (document: Document) => void;
   updateDocument: (id: string, updates: Partial<Document>) => void;
@@ -26,6 +26,7 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [schemas, setSchemas] = useState<DocumentSchema[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [fetchError, setFetchError] = useState<Error | null>(null);
   const { user } = useAuth();
 
   // Set up realtime subscription for documents updates
@@ -118,6 +119,8 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
 
     try {
       setIsLoading(true);
+      setFetchError(null);
+      
       const { data, error } = await supabase
         .from("documents")
         .select("*")
@@ -141,7 +144,7 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         createdAt: doc.created_at,
         updatedAt: doc.updated_at,
         userId: doc.user_id,
-        organizationId: doc.pipeline_id, // Use pipeline_id instead of organization_id
+        organizationId: doc.pipeline_id,
         pipelineId: doc.pipeline_id,
         processing_progress: doc.processing_progress,
         processing_error: doc.processing_error
@@ -155,11 +158,7 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
       setDocuments(documentsList);
     } catch (error) {
       console.error("Error fetching documents:", error);
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to fetch documents",
-        variant: "destructive",
-      });
+      setFetchError(error instanceof Error ? error : new Error('Unknown fetch error'));
     } finally {
       setIsLoading(false);
     }
@@ -514,6 +513,7 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         documents,
         schemas,
         isLoading,
+        fetchError,
         setDocuments,
         addDocument,
         updateDocument,

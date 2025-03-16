@@ -3,13 +3,14 @@ import * as React from "react";
 import { Document } from "@/types";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Check, FileIcon, UploadIcon, ExternalLink, AlertTriangle, Clock } from "lucide-react";
+import { Check, FileIcon, UploadIcon, ExternalLink, AlertTriangle, Clock, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useNavigate } from "react-router-dom";
+import { useDocuments } from "@/context/DocumentContext";
 
 interface SimpleDocumentListProps {
   documents: Document[];
@@ -25,6 +26,8 @@ export function SimpleDocumentList({
   onSelectionChange
 }: SimpleDocumentListProps) {
   const navigate = useNavigate();
+  const { fetchError, fetchUserDocuments } = useDocuments();
+  const [isRetrying, setIsRetrying] = React.useState(false);
   
   const handleToggleDocument = (documentId: string, checked: boolean) => {
     if (checked) {
@@ -39,6 +42,15 @@ export function SimpleDocumentList({
       onSelectionChange(documents.map(doc => doc.id));
     } else {
       onSelectionChange([]);
+    }
+  };
+
+  const handleRetry = async () => {
+    setIsRetrying(true);
+    try {
+      await fetchUserDocuments();
+    } finally {
+      setIsRetrying(false);
     }
   };
 
@@ -99,11 +111,39 @@ export function SimpleDocumentList({
       <Card>
         <CardContent className="pt-6">
           <div className="text-center py-8">
-            <FileIcon className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-            <p className="text-muted-foreground">No documents found</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              Upload documents to get started.
-            </p>
+            {fetchError ? (
+              <div className="flex flex-col items-center gap-2">
+                <AlertTriangle className="h-8 w-8 text-destructive" />
+                <p className="text-destructive">Could not load documents</p>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="mt-2"
+                  onClick={handleRetry}
+                  disabled={isRetrying}
+                >
+                  {isRetrying ? (
+                    <>
+                      <RefreshCw className="h-3 w-3 mr-2 animate-spin" />
+                      Retrying...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="h-3 w-3 mr-2" />
+                      Try Again
+                    </>
+                  )}
+                </Button>
+              </div>
+            ) : (
+              <>
+                <FileIcon className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+                <p className="text-muted-foreground">No documents found</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Upload documents to get started.
+                </p>
+              </>
+            )}
           </div>
         </CardContent>
       </Card>
