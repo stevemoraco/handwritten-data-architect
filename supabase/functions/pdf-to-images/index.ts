@@ -65,7 +65,7 @@ async function processPdf(supabase, userId, documentId) {
     // Get document record to access the URL
     const { data: document, error: docError } = await supabase
       .from("documents")
-      .select("original_url, url, name")
+      .select("original_url, url, name, user_id")
       .eq("id", documentId)
       .single();
       
@@ -73,42 +73,125 @@ async function processPdf(supabase, userId, documentId) {
       throw new Error(`Failed to get document: ${docError?.message || "Document not found"}`);
     }
     
-    // Get the PDF URL directly from the document record
-    const pdfUrl = document.original_url || document.url;
-    if (!pdfUrl) {
-      throw new Error("No document URL available");
+    // First try direct download using the URL from the document
+    let fileData;
+    let downloadError;
+    
+    // Try both URLs if available
+    if (document.original_url) {
+      try {
+        console.log(`Attempting to download from original_url: ${document.original_url}`);
+        const response = await fetch(document.original_url);
+        if (response.ok) {
+          fileData = await response.arrayBuffer();
+          console.log("Downloaded from original_url successfully");
+        } else {
+          console.log(`Failed to download from original_url: ${response.status} ${response.statusText}`);
+        }
+      } catch (error) {
+        console.log(`Error downloading from original_url: ${error.message}`);
+      }
     }
     
-    console.log(`Document URL: ${pdfUrl}`);
-    
-    // For Supabase storage, extract the path from the URL
-    // The URL format is: https://{projectId}.supabase.co/storage/v1/object/public/document_files/{path}
-    const pathMatch = pdfUrl.match(/document_files\/(.+)$/);
-    if (!pathMatch || !pathMatch[1]) {
-      throw new Error(`Invalid document URL format: ${pdfUrl}`);
+    // Try with URL if original_url failed
+    if (!fileData && document.url && document.url !== document.original_url) {
+      try {
+        console.log(`Attempting to download from url: ${document.url}`);
+        const response = await fetch(document.url);
+        if (response.ok) {
+          fileData = await response.arrayBuffer();
+          console.log("Downloaded from url successfully");
+        } else {
+          console.log(`Failed to download from url: ${response.status} ${response.statusText}`);
+        }
+      } catch (error) {
+        console.log(`Error downloading from url: ${error.message}`);
+      }
     }
     
-    const pdfPath = decodeURIComponent(pathMatch[1]);
-    console.log(`Extracted PDF path: ${pdfPath}`);
+    // If direct URL download failed, try using storage API with different path strategies
+    if (!fileData) {
+      // Try strategy 1: Document ID path
+      const idBasedPath = `${document.user_id || userId}/${documentId}/original.pdf`;
+      console.log(`Attempting to download using ID-based path: ${idBasedPath}`);
+      
+      try {
+        const { data: idPathData, error: idPathError } = await supabase.storage
+          .from("document_files")
+          .download(idBasedPath);
+          
+        if (idPathError) {
+          console.log(`Error downloading with ID path: ${idPathError.message}`);
+        } else if (idPathData) {
+          fileData = await idPathData.arrayBuffer();
+          console.log("Downloaded using ID-based path successfully");
+          
+          // Update the document record with the correct URL
+          const { data: urlData } = supabase.storage
+            .from("document_files")
+            .getPublicUrl(idBasedPath);
+            
+          if (urlData?.publicUrl) {
+            await supabase
+              .from("documents")
+              .update({ 
+                original_url: urlData.publicUrl,
+                url: urlData.publicUrl 
+              })
+              .eq("id", documentId);
+          }
+        }
+      } catch (error) {
+        console.log(`Error in ID-based download: ${error.message}`);
+      }
+    }
     
-    // Download the PDF file
-    const { data: fileData, error: downloadError } = await supabase.storage
-      .from("document_files")
-      .download(pdfPath);
-
-    if (downloadError) {
-      throw new Error(`Failed to download PDF: ${downloadError.message}`);
+    // Try strategy 2: Name-based path if ID-based failed
+    if (!fileData) {
+      const encodedFilename = encodeURIComponent(document.name);
+      const nameBasedPath = `${document.user_id || userId}/uploads/${encodedFilename}`;
+      console.log(`Attempting to download using name-based path: ${nameBasedPath}`);
+      
+      try {
+        const { data: namePathData, error: namePathError } = await supabase.storage
+          .from("document_files")
+          .download(nameBasedPath);
+          
+        if (namePathError) {
+          console.log(`Error downloading with name path: ${namePathError.message}`);
+        } else if (namePathData) {
+          fileData = await namePathData.arrayBuffer();
+          console.log("Downloaded using name-based path successfully");
+          
+          // Update the document record with the correct URL
+          const { data: urlData } = supabase.storage
+            .from("document_files")
+            .getPublicUrl(nameBasedPath);
+            
+          if (urlData?.publicUrl) {
+            await supabase
+              .from("documents")
+              .update({ 
+                original_url: urlData.publicUrl,
+                url: urlData.publicUrl 
+              })
+              .eq("id", documentId);
+          }
+        }
+      } catch (error) {
+        console.log(`Error in name-based download: ${error.message}`);
+      }
     }
 
     if (!fileData) {
-      throw new Error("PDF file data is null");
+      throw new Error("Could not download PDF file using any strategy");
     }
 
     console.log("PDF file downloaded successfully.");
 
     // Load the PDF document
     console.log("Loading the PDF document...");
-    const pdf = await pdfjs.getDocument({ data: await fileData.arrayBuffer() }).promise;
+    const pdf = await pdfjs.getDocument({ data: fileData }).promise;
     pageCount = pdf.numPages;
     console.log(`PDF loaded with ${pageCount} pages.`);
 
@@ -118,19 +201,56 @@ async function processPdf(supabase, userId, documentId) {
       try {
         const page = await pdf.getPage(i);
         const viewport = page.getViewport({ scale: 0.2 });
-        const canvas = document.createElement("canvas");
+        const canvas = new OffscreenCanvas(viewport.width, viewport.height);
         const context = canvas.getContext("2d");
-        canvas.height = viewport.height;
-        canvas.width = viewport.width;
+        
+        if (!context) {
+          throw new Error("Failed to get canvas context");
+        }
 
         await page.render({
           canvasContext: context,
           viewport,
         }).promise;
 
-        const dataUrl = canvas.toDataURL("image/jpeg");
-        thumbnails.push(dataUrl);
-        console.log(`Thumbnail generated for page ${i}`);
+        const imageData = context.getImageData(0, 0, viewport.width, viewport.height);
+        const buffer = imageData.data.buffer;
+        
+        // Save the page image to storage
+        const pagePath = `${document.user_id || userId}/${documentId}/pages/page-${i}.jpg`;
+        
+        const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.8 });
+        const arrayBuffer = await blob.arrayBuffer();
+        
+        const { error: pageUploadError } = await supabase.storage
+          .from("document_files")
+          .upload(pagePath, arrayBuffer, {
+            contentType: "image/jpeg",
+            upsert: true
+          });
+          
+        if (pageUploadError) {
+          console.error(`Error uploading page ${i} image:`, pageUploadError);
+          continue;
+        }
+        
+        // Get the URL for the uploaded page image
+        const { data: pageUrlData } = supabase.storage
+          .from("document_files")
+          .getPublicUrl(pagePath);
+          
+        if (pageUrlData?.publicUrl) {
+          thumbnails.push(pageUrlData.publicUrl);
+          
+          // Create or update the document page record
+          await supabase.from("document_pages").upsert({
+            document_id: documentId,
+            page_number: i,
+            image_url: pageUrlData.publicUrl
+          }, { onConflict: 'document_id,page_number' });
+          
+          console.log(`Page ${i} processed and saved`);
+        }
       } catch (thumbnailError) {
         console.error(`Error generating thumbnail for page ${i}:`, thumbnailError);
         // Continue with the next page, but log the error
@@ -145,7 +265,6 @@ async function processPdf(supabase, userId, documentId) {
       .from("documents")
       .update({
         page_count: pageCount,
-        thumbnails: thumbnails,
         status: 'processed'
       })
       .eq("id", documentId);

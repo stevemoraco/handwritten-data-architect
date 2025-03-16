@@ -1,4 +1,3 @@
-
 import { v4 as uuidv4 } from "uuid";
 import { supabase } from "@/integrations/supabase/client";
 import { Document, DocumentData, ProcessingLog, UploadProgress } from "@/types";
@@ -91,25 +90,45 @@ export async function uploadDocument(
       });
     }
 
-    // Use a consistent path for all uploads
-    // Format: userId/uploads/filename
-    const uploadPath = `${userId}/uploads/${encodeURIComponent(filename)}`;
+    // Use both storage strategies to maximize compatibility
     
-    console.log(`Uploading file to path: ${uploadPath}`);
+    // Strategy 1: Store by document ID (new format)
+    const idBasedPath = `${userId}/${id}/original${fileType === 'pdf' ? '.pdf' : ''}`;
+    console.log(`Uploading file to path (ID-based): ${idBasedPath}`);
+    
+    const { error: idUploadError } = await supabase.storage
+      .from("document_files")
+      .upload(idBasedPath, file, {
+        cacheControl: "3600",
+        upsert: true
+      });
       
+    if (idUploadError) {
+      console.error("Error uploading to ID-based path:", idUploadError);
+    }
+    
+    // Strategy 2: Store in uploads folder by name (old format)
+    const nameBasedPath = `${userId}/uploads/${encodeURIComponent(filename)}`;
+    console.log(`Uploading file to path (name-based): ${nameBasedPath}`);
+    
     const { error: uploadError } = await supabase.storage
       .from("document_files")
-      .upload(uploadPath, file, {
+      .upload(nameBasedPath, file, {
         cacheControl: "3600",
         upsert: true
       });
 
     if (uploadError) {
-      await supabase
-        .from("documents")
-        .update({ status: "failed", processing_error: uploadError.message })
-        .eq("id", id);
-      throw new Error(`Failed to upload file: ${uploadError.message}`);
+      console.error("Error uploading to name-based path:", uploadError);
+      
+      // If both uploads failed, mark as failed
+      if (idUploadError) {
+        await supabase
+          .from("documents")
+          .update({ status: "failed", processing_error: "Failed to upload file to storage" })
+          .eq("id", id);
+        throw new Error(`Failed to upload file: ${uploadError.message}`);
+      }
     }
 
     // Update progress if callback exists
@@ -122,17 +141,30 @@ export async function uploadDocument(
       });
     }
 
-    // Get the public URL for the uploaded file
-    const { data: publicUrlData } = supabase.storage
+    // Get public URLs for both paths
+    const { data: idPathUrlData } = supabase.storage
       .from("document_files")
-      .getPublicUrl(uploadPath);
+      .getPublicUrl(idBasedPath);
+      
+    const { data: namePathUrlData } = supabase.storage
+      .from("document_files")
+      .getPublicUrl(nameBasedPath);
+    
+    // Use the first available URL, preferring the ID-based one
+    const publicUrl = 
+      (idUploadError ? null : idPathUrlData?.publicUrl) || 
+      (uploadError ? null : namePathUrlData?.publicUrl);
+    
+    if (!publicUrl) {
+      throw new Error("Failed to get public URL for uploaded file");
+    }
 
     // Update document with URL - CRITICAL to store the actual working URL
     const { error: updateError } = await supabase
       .from("documents")
       .update({
-        original_url: publicUrlData.publicUrl,
-        url: publicUrlData.publicUrl, // Store the same URL in both fields
+        original_url: publicUrl,
+        url: publicUrl, // Store the same URL in both fields
         status: "processing"
       })
       .eq("id", id);
@@ -540,3 +572,6 @@ export function getExtractedData(documentId: string): Promise<DocumentData[]> {
     }
   });
 }
+
+export
+

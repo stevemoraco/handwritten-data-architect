@@ -1,174 +1,260 @@
 
 import * as React from "react";
 import { useDocuments } from "@/context/DocumentContext";
-import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { DocumentCard } from "@/components/document/DocumentCard";
-import { useNavigate } from "react-router-dom";
-import { Trash2 } from "lucide-react";
-import { toast } from "@/components/ui/use-toast";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { Separator } from "@/components/ui/separator";
+import { Check, FileIcon, UploadIcon, ExternalLink, AlertTriangle, Clock } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
+import { formatDistanceToNow } from "date-fns";
+import { Skeleton } from "@/components/ui/skeleton";
 
-interface BatchDocumentsSelectorProps {
-  onSelectionChange?: (selectedIds: string[]) => void;
+export interface BatchDocumentsSelectorProps {
+  onSelectionChange: (selectedIds: string[]) => void;
+  selectedIds?: string[];
+  maxSelections?: number;
+  showTitle?: boolean;
+  hideCheckboxes?: boolean;
+  customHeader?: React.ReactNode;
+  customActions?: React.ReactNode;
+  renderExtraActions?: (doc: any) => React.ReactNode;
 }
 
 export function BatchDocumentsSelector({
   onSelectionChange,
+  selectedIds: externalSelectedIds,
+  maxSelections = 0,
+  showTitle = true,
+  hideCheckboxes = false,
+  customHeader,
+  customActions,
+  renderExtraActions
 }: BatchDocumentsSelectorProps) {
-  const { documents, isLoading, removeBatchDocuments } = useDocuments();
-  const [selectedDocumentIds, setSelectedDocumentIds] = React.useState<string[]>([]);
-  const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
-  const navigate = useNavigate();
-  
+  const { documents, isLoading, error } = useDocuments();
+  const [selectedIds, setSelectedIds] = React.useState<string[]>(externalSelectedIds || []);
+  const [isControlledComponent] = React.useState(!!externalSelectedIds);
+
   React.useEffect(() => {
-    if (onSelectionChange) {
-      onSelectionChange(selectedDocumentIds);
+    if (isControlledComponent && externalSelectedIds) {
+      setSelectedIds(externalSelectedIds);
     }
-  }, [selectedDocumentIds, onSelectionChange]);
+  }, [externalSelectedIds, isControlledComponent]);
 
-  const toggleDocumentSelection = (documentId: string) => {
-    setSelectedDocumentIds(prev => 
-      prev.includes(documentId)
-        ? prev.filter(id => id !== documentId)
-        : [...prev, documentId]
-    );
-  };
-
-  const selectAll = () => {
-    setSelectedDocumentIds(documents.map(doc => doc.id));
-  };
-
-  const deselectAll = () => {
-    setSelectedDocumentIds([]);
-  };
-
-  const handleDeleteSelected = async () => {
-    if (selectedDocumentIds.length === 0) return;
+  // Used for internal state management
+  const handleSelectDocument = (documentId: string, checked: boolean) => {
+    let newSelectedIds: string[];
     
-    try {
-      setDeleteDialogOpen(false);
-      await removeBatchDocuments(selectedDocumentIds);
-      setSelectedDocumentIds([]);
-    } catch (error) {
-      console.error("Error deleting documents:", error);
-      toast({
-        title: "Delete Failed",
-        description: error instanceof Error ? error.message : "Failed to delete documents",
-        variant: "destructive",
-      });
+    if (checked) {
+      // If we have a max selection and we're at the limit, replace the oldest selection
+      if (maxSelections > 0 && selectedIds.length >= maxSelections) {
+        newSelectedIds = [...selectedIds.slice(1), documentId];
+      } else {
+        newSelectedIds = [...selectedIds, documentId];
+      }
+    } else {
+      newSelectedIds = selectedIds.filter(id => id !== documentId);
+    }
+    
+    setSelectedIds(newSelectedIds);
+    onSelectionChange(newSelectedIds);
+  };
+
+  // Toggle all documents
+  const handleToggleAll = (checked: boolean) => {
+    if (checked) {
+      const allIds = documents.map(doc => doc.id);
+      const newSelectedIds = maxSelections > 0 
+        ? allIds.slice(0, maxSelections)
+        : allIds;
+      setSelectedIds(newSelectedIds);
+      onSelectionChange(newSelectedIds);
+    } else {
+      setSelectedIds([]);
+      onSelectionChange([]);
     }
   };
 
-  const viewDocument = (documentId: string) => {
-    navigate(`/document/${documentId}`);
+  const isDocumentSelected = (documentId: string) => {
+    return selectedIds.includes(documentId);
   };
 
-  const processDocument = (documentId: string) => {
-    navigate('/process', { state: { documentIds: [documentId] } });
+  const allSelected = documents.length > 0 && selectedIds.length === documents.length;
+  const sortedDocuments = [...documents].sort((a, b) => {
+    // First sort by selection status
+    const aSelected = isDocumentSelected(a.id);
+    const bSelected = isDocumentSelected(b.id);
+    if (aSelected && !bSelected) return -1;
+    if (!aSelected && bSelected) return 1;
+    
+    // Then by creation date (newest first)
+    return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+  });
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'processed':
+        return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100';
+      case 'processing':
+        return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100';
+      case 'failed':
+        return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100';
+      default:
+        return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200';
+    }
   };
 
-  const handleUploadDocuments = () => {
-    // Navigate to the dashboard with the upload tab active
-    navigate('/?tab=upload');
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case 'processed':
+        return <Check className="h-3 w-3" />;
+      case 'processing':
+        return <Clock className="h-3 w-3" />;
+      case 'failed':
+        return <AlertTriangle className="h-3 w-3" />;
+      default:
+        return <UploadIcon className="h-3 w-3" />;
+    }
   };
-
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center p-8">
-        <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full"></div>
-      </div>
-    );
-  }
-
-  if (documents.length === 0) {
-    return (
-      <div className="text-center p-8 border rounded-lg bg-muted/10">
-        <h3 className="text-lg font-medium mb-2">No documents found</h3>
-        <p className="text-muted-foreground mb-4">Upload documents to get started</p>
-        <Button onClick={handleUploadDocuments}>Upload Documents</Button>
-      </div>
-    );
-  }
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap gap-2 items-center justify-between">
-        <div className="flex flex-wrap gap-2 items-center">
-          <Button 
-            variant="outline" 
-            size="sm" 
-            onClick={selectAll}
-            disabled={documents.length === selectedDocumentIds.length}
-          >
-            Select All
-          </Button>
-          
-          <Button 
-            variant="outline" 
-            size="sm" 
-            onClick={deselectAll}
-            disabled={selectedDocumentIds.length === 0}
-          >
-            Deselect All
-          </Button>
-          
-          {selectedDocumentIds.length > 0 && (
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => setDeleteDialogOpen(true)}
-              className="gap-1"
-            >
-              <Trash2 className="h-4 w-4" />
-              Delete Selected ({selectedDocumentIds.length})
-            </Button>
+    <Card>
+      {(showTitle || customHeader) && (
+        <CardHeader className="pb-3">
+          {customHeader || (
+            <CardTitle className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <FileIcon className="h-5 w-5" />
+                <span>Documents</span>
+                <Badge variant="outline">
+                  {selectedIds.length > 0 ? `${selectedIds.length} selected` : documents.length}
+                </Badge>
+              </div>
+              {documents.length > 0 && !hideCheckboxes && (
+                <div className="flex items-center gap-2">
+                  <Checkbox 
+                    id="select-all" 
+                    checked={allSelected}
+                    onCheckedChange={handleToggleAll} 
+                  />
+                  <label 
+                    htmlFor="select-all" 
+                    className="text-sm cursor-pointer"
+                  >
+                    {allSelected ? 'Deselect All' : 'Select All'}
+                  </label>
+                </div>
+              )}
+              {customActions}
+            </CardTitle>
           )}
-        </div>
-        
-        <p className="text-sm text-muted-foreground">
-          {selectedDocumentIds.length} of {documents.length} selected
-        </p>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {documents.map((document) => (
-          <DocumentCard 
-            key={document.id}
-            document={document}
-            onView={() => viewDocument(document.id)}
-            onProcess={() => processDocument(document.id)}
-            isSelected={selectedDocumentIds.includes(document.id)}
-            onToggleSelect={() => toggleDocumentSelection(document.id)}
-          />
-        ))}
-      </div>
-      
-      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will permanently delete {selectedDocumentIds.length} document(s). This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDeleteSelected} className="bg-destructive text-destructive-foreground">
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
+        </CardHeader>
+      )}
+      <CardContent className={cn(showTitle || customHeader ? "" : "pt-6")}>
+        {isLoading ? (
+          <div className="space-y-3">
+            {[...Array(3)].map((_, index) => (
+              <div key={index} className="flex items-start gap-3">
+                <Skeleton className="h-4 w-4 rounded-sm" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-3 w-2/3" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : error ? (
+          <div className="text-center py-8">
+            <AlertTriangle className="h-8 w-8 text-amber-500 mx-auto mb-2" />
+            <p className="text-muted-foreground">Failed to load documents</p>
+            <p className="text-xs text-muted-foreground mt-1">{error}</p>
+          </div>
+        ) : documents.length === 0 ? (
+          <div className="text-center py-8">
+            <FileIcon className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+            <p className="text-muted-foreground">No documents found</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Upload documents to get started.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {sortedDocuments.map((document) => (
+              <div 
+                key={document.id} 
+                className={cn(
+                  "flex items-start gap-3 p-3 rounded-md",
+                  isDocumentSelected(document.id)
+                    ? "bg-primary/10"
+                    : "hover:bg-muted/50 transition-colors"
+                )}
+              >
+                {!hideCheckboxes && (
+                  <Checkbox 
+                    id={`doc-${document.id}`}
+                    checked={isDocumentSelected(document.id)} 
+                    onCheckedChange={(checked) => handleSelectDocument(document.id, !!checked)}
+                    className="mt-1"
+                  />
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-2">
+                    <label 
+                      htmlFor={`doc-${document.id}`}
+                      className={cn(
+                        "font-medium text-sm cursor-pointer truncate",
+                        hideCheckboxes && "cursor-default"
+                      )}
+                    >
+                      {document.name}
+                    </label>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Badge 
+                        variant="outline"
+                        className={cn(
+                          "text-xs font-normal py-0 h-5 gap-1",
+                          getStatusColor(document.status)
+                        )}
+                      >
+                        {getStatusIcon(document.status)}
+                        {document.status}
+                      </Badge>
+                      
+                      {document.original_url && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-5 w-5 p-0"
+                          title="View original document"
+                          onClick={() => window.open(document.original_url, '_blank')}
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                      
+                      {/* Render custom action buttons if provided */}
+                      {renderExtraActions && renderExtraActions(document)}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
+                    <span>{document.type.toUpperCase()}</span>
+                    <span className="h-1 w-1 rounded-full bg-muted-foreground/50"></span>
+                    <span>{document.pageCount || 0} pages</span>
+                    <span className="h-1 w-1 rounded-full bg-muted-foreground/50"></span>
+                    <span>{document.createdAt ? formatDistanceToNow(new Date(document.createdAt), { addSuffix: true }) : 'Unknown date'}</span>
+                  </div>
+                  {document.status === 'failed' && document.processingError && (
+                    <div className="mt-1 text-xs text-destructive">
+                      Error: {document.processingError}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

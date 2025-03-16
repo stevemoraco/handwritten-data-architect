@@ -309,7 +309,7 @@ export default function Documents() {
       
       <BatchDocumentsSelector 
         onSelectionChange={setSelectedDocumentIds}
-        extraActions={(doc) => (
+        renderExtraActions={(doc) => (
           <Button
             variant="ghost"
             size="sm"
@@ -459,4 +459,3 @@ export default function Documents() {
     </div>
   );
 }
-
