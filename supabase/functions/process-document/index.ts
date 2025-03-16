@@ -1,4 +1,3 @@
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.38.4";
 
@@ -100,11 +99,35 @@ serve(async (req) => {
       }
       result = await generateSchema(documentIds, GEMINI_API_KEY, supabase);
     } else if (operation === "extractData") {
-      const { schemaId } = requestData;
-      if (!schemaId) {
-        throw new Error("SchemaId is required for data extraction");
+      try {
+        const { schemaId } = requestData;
+        if (!schemaId) {
+          throw new Error("SchemaId is required for data extraction");
+        }
+        result = await extractDocumentData(document, pages, schemaId, GEMINI_API_KEY, supabase);
+      } catch (extractError) {
+        console.error("Data extraction error:", extractError);
+        // Log the error but don't fail the entire process
+        await supabase.from("processing_logs").insert({
+          document_id: documentId,
+          action: "Data Extraction Error",
+          status: "error",
+          message: extractError.message || "Unknown error in data extraction",
+        });
+        
+        // Return a response with the error, but don't throw
+        return new Response(
+          JSON.stringify({ 
+            success: false, 
+            error: extractError.message || "Data extraction failed",
+            operation: "extractData"
+          }),
+          { 
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 200, // Return 200 with error info in body
+          }
+        );
       }
-      result = await extractDocumentData(document, pages, schemaId, GEMINI_API_KEY, supabase);
     } else {
       throw new Error(`Unknown operation: ${operation}`);
     }
@@ -542,67 +565,90 @@ ${transcriptionText}`
   return schema;
 }
 
-// Function to extract data from a document based on a schema
+// Improve the data extraction function to handle errors better
 async function extractDocumentData(document, pages, schemaId, apiKey, supabase) {
   console.log("Starting data extraction using Gemini API");
   
-  // Get the schema
-  const { data: schema, error: schemaError } = await supabase
-    .from("document_schemas")
-    .select("*")
-    .eq("id", schemaId)
-    .single();
-  
-  if (schemaError) {
-    throw new Error(`Failed to fetch schema: ${schemaError.message}`);
-  }
-  
-  if (!schema) {
-    throw new Error("Schema not found with the provided ID");
-  }
-  
-  // Prepare image parts for the Gemini model
-  const imageParts = await Promise.all(pages.map(async (page) => {
-    // Get image data
-    const imageUrl = page.image_url;
-    const response = await fetch(imageUrl);
-    const imageBlob = await response.blob();
+  try {
+    // Get the schema
+    const { data: schema, error: schemaError } = await supabase
+      .from("document_schemas")
+      .select("*")
+      .eq("id", schemaId)
+      .single();
     
-    // Convert blob to base64
-    const buffer = await imageBlob.arrayBuffer();
-    const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+    if (schemaError) {
+      throw new Error(`Failed to fetch schema: ${schemaError.message}`);
+    }
     
-    return {
-      inlineData: {
-        mimeType: "image/png",
-        data: base64
+    if (!schema) {
+      throw new Error("Schema not found with the provided ID");
+    }
+    
+    // Prepare image parts for the Gemini model
+    const imageParts = await Promise.all(pages.map(async (page) => {
+      try {
+        // Get image data
+        const imageUrl = page.image_url;
+        if (!imageUrl) {
+          console.warn(`No image URL for page ${page.page_number}`);
+          return null;
+        }
+        
+        const response = await fetch(imageUrl);
+        if (!response.ok) {
+          console.error(`Failed to fetch image for page ${page.page_number}: ${response.status}`);
+          return null;
+        }
+        
+        const imageBlob = await response.blob();
+        
+        // Convert blob to base64
+        const buffer = await imageBlob.arrayBuffer();
+        const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+        
+        return {
+          inlineData: {
+            mimeType: "image/png",
+            data: base64
+          }
+        };
+      } catch (error) {
+        console.error(`Error processing image for page ${page.page_number}:`, error);
+        return null;
       }
-    };
-  }));
+    }));
+    
+    // Filter out nulls
+    const validImageParts = imageParts.filter(part => part !== null);
+    
+    if (validImageParts.length === 0) {
+      throw new Error("No valid images available for data extraction");
+    }
+    
+    // Update progress to indicate preparation complete
+    await supabase
+      .from("documents")
+      .update({
+        processing_progress: 30,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", document.id);
   
-  // Update progress to indicate preparation complete
-  await supabase
-    .from("documents")
-    .update({
-      processing_progress: 30,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", document.id);
+    // Log start of Gemini processing
+    await supabase.from("processing_logs").insert({
+      document_id: document.id,
+      action: "Gemini Data Extraction",
+      status: "success",
+      message: "Starting Gemini API data extraction process",
+    });
   
-  // Log start of Gemini processing
-  await supabase.from("processing_logs").insert({
-    document_id: document.id,
-    action: "Gemini Data Extraction",
-    status: "success",
-    message: "Starting Gemini API data extraction process",
-  });
-  
-  // Build the Gemini prompt for data extraction
-  const schemaJSON = JSON.stringify(schema.structure, null, 2);
-  
-  const promptParts = [
-    {
-      text: `Extract structured data from the provided document images according to the following schema. 
+    // Build the Gemini prompt for data extraction
+    const schemaJSON = JSON.stringify(schema.structure, null, 2);
+    
+    const promptParts = [
+      {
+        text: `Extract structured data from the provided document images according to the following schema. 
 
 Schema structure:
 ${schemaJSON}
@@ -629,100 +675,12 @@ Return your response as a JSON object with this structure:
   "confidence": 0.95, // Overall confidence in extraction accuracy (0-1)
   "processingTime": "X seconds"
 }`
-    },
-    ...imageParts
-  ];
-  
-  const prompt = {
-    contents: [
-      {
-        role: "user",
-        parts: promptParts
-      }
-    ],
-    generationConfig: {
-      temperature: 0.2,
-      topP: 0.8,
-      topK: 40,
-      maxOutputTokens: 4096,
-    }
-  };
-  
-  // Call Gemini API
-  const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key=" + apiKey, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(prompt),
-  });
-  
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error("Gemini API error:", errorText);
-    throw new Error(`Gemini API returned error: ${response.status} ${response.statusText}`);
-  }
-  
-  const result = await response.json();
-  
-  if (!result.candidates || result.candidates.length === 0 || !result.candidates[0].content) {
-    throw new Error("Gemini API returned no content");
-  }
-  
-  // Extract the data JSON
-  const dataText = result.candidates[0].content.parts[0].text;
-  
-  // Parse the JSON from the text response
-  let extractedData;
-  try {
-    // The model might return the JSON with markdown code blocks, so we need to clean it
-    const jsonString = dataText.replace(/```json|```/g, '').trim();
-    extractedData = JSON.parse(jsonString);
-  } catch (error) {
-    console.error("Error parsing extracted data JSON:", error, dataText);
-    throw new Error("Failed to parse extracted data JSON from Gemini response");
-  }
-  
-  // For each table and field in the extracted data, save to document_data table
-  const { extractedData: tables, confidence } = extractedData;
-  
-  for (const tableName in tables) {
-    const tableData = tables[tableName];
-    const table = schema.structure.find(t => t.name === tableName);
+      },
+      ...validImageParts
+    ];
     
-    if (table) {
-      for (const fieldName in tableData) {
-        const field = table.fields.find(f => f.name === fieldName);
-        
-        if (field) {
-          await supabase.from("document_data").insert({
-            document_id: document.id,
-            table_id: table.id,
-            field_id: field.id,
-            value: tableData[fieldName],
-            confidence: confidence
-          });
-        }
-      }
-    }
-  }
-  
-  // Update progress
-  await supabase
-    .from("documents")
-    .update({
-      processing_progress: 100,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", document.id);
-  
-  // Log completion
-  await supabase.from("processing_logs").insert({
-    document_id: document.id,
-    action: "Gemini Data Extraction Complete",
-    status: "success",
-    message: "Successfully extracted document data using Gemini API",
-  });
-  
-  return extractedData;
-}
+    const prompt = {
+      contents: [
+        {
+
+

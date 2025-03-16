@@ -494,30 +494,36 @@ export default function DocumentProcess() {
       
       console.log(`Extracting data from document ${exampleDocument.id} based on schema`);
       
-      const extractedResult = await extractDocumentData(exampleDocument.id, schema.id);
-      
-      if (!extractedResult) {
-        throw new Error("Data extraction failed");
-      }
-      
-      let extractedObject;
       try {
-        if (typeof extractedResult === 'string') {
-          extractedObject = JSON.parse(extractedResult);
-        } else {
-          extractedObject = extractedResult;
+        const extractedResult = await extractDocumentData(exampleDocument.id, schema.id);
+        
+        if (!extractedResult) {
+          throw new Error("No data returned from extraction");
         }
+        
+        let extractedObject;
+        try {
+          if (typeof extractedResult === 'string') {
+            extractedObject = JSON.parse(extractedResult);
+          } else {
+            extractedObject = extractedResult;
+          }
+        } catch (error) {
+          console.error("Error parsing extracted data:", error);
+          throw new Error("Invalid data format received");
+        }
+        
+        setExtractedData(extractedObject);
+        
+        updateStepStatus("Schema Refinement", "in_progress", 100);
+        console.log("Schema refinement preparation completed");
+        
+        setActiveTab("schema");
       } catch (error) {
-        console.error("Error parsing extracted data:", error);
-        throw new Error("Invalid data format received");
+        console.error("Error in data extraction:", error);
+        updateStepStatus("Schema Refinement", "in_progress", 50);
+        setActiveTab("schema");
       }
-      
-      setExtractedData(extractedObject);
-      
-      updateStepStatus("Schema Refinement", "in_progress", 100);
-      console.log("Schema refinement preparation completed");
-      
-      setActiveTab("schema");
       
     } catch (error) {
       console.error("Error in prepareSchemaRefinement:", error);

@@ -42,7 +42,13 @@ export const processWithGemini = async (prompt: GeminiPrompt): Promise<string> =
     // Call the edge function
     const response = await supabase.functions.invoke(endpoint, { body });
     
-    if (!response.data || !response.data.success) {
+    // Improved error handling - check for null response
+    if (!response || !response.data) {
+      console.error(`No response received from ${operation}`);
+      throw new Error(`No response received from ${operation}`);
+    }
+    
+    if (!response.data.success) {
       const errorMessage = response.data?.error || `Unknown error in ${operation}`;
       console.error(`Error in ${operation}:`, errorMessage);
       throw new Error(errorMessage);

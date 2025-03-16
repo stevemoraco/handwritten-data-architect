@@ -26,6 +26,30 @@ export async function uploadDocument(
   const fileType = file.type === "application/pdf" ? "pdf" : "image";
 
   try {
+    // Check for duplicates before uploading
+    const { data: existingDocs, error: queryError } = await supabase
+      .from("documents")
+      .select("id, name, size")
+      .eq("user_id", userId)
+      .eq("name", filename);
+    
+    if (queryError) {
+      console.error("Error checking for duplicates:", queryError);
+    } else if (existingDocs && existingDocs.length > 0) {
+      // Check if size matches too for extra verification
+      const potentialDuplicate = existingDocs.find(doc => 
+        doc.size === file.size || Math.abs(doc.size - file.size) < 100 // Allow small difference in size
+      );
+      
+      if (potentialDuplicate) {
+        return {
+          id: potentialDuplicate.id,
+          success: true,
+          error: "Document already exists and was selected instead of uploading a duplicate."
+        };
+      }
+    }
+
     // Create upload progress tracker
     const uploadId = setProgress ? 
       uuidv4() : 
@@ -372,14 +396,23 @@ export async function extractDocumentData(documentId: string, schemaId: string):
       }
     });
 
+    // Enhanced error handling
+    if (!response || !response.data) {
+      console.error("No response received from data extraction");
+      throw new Error("No response received from data extraction");
+    }
+
     if (!response.data.success) {
-      throw new Error(response.data.error || "Unknown error in data extraction");
+      const errorMessage = response.data.error || "Unknown error in data extraction";
+      console.error("Data extraction error:", errorMessage);
+      throw new Error(errorMessage);
     }
 
     return response.data.result || null;
   } catch (error) {
     console.error("Error in extractDocumentData:", error);
-    return null;
+    // Re-throw to propagate the error for proper handling
+    throw error;
   }
 }
 
