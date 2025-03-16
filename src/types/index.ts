@@ -1,4 +1,3 @@
-
 export interface User {
   id: string;
   email: string;
@@ -41,7 +40,6 @@ export interface Document {
   userId: string;
   organizationId?: string;
   pipelineId?: string;
-  error?: string;
 }
 
 export interface DocumentSchema {
