@@ -40,23 +40,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
         const { data: { session } } = await supabase.auth.getSession();
         
         if (session?.user) {
-          // Fetch user profile from profiles table
-          const { data: profileData, error: profileError } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', session.user.id)
-            .single();
-          
-          if (profileError && profileError.code !== 'PGRST116') {
-            console.error('Error fetching profile:', profileError);
-          }
-          
+          // Create a user object from the session data without relying on profiles table
           setUser({
             id: session.user.id,
             email: session.user.email || '',
-            name: profileData?.name || session.user.email?.split('@')[0] || 'User',
+            name: session.user.user_metadata?.name || 
+                  session.user.user_metadata?.full_name || 
+                  session.user.email?.split('@')[0] || 'User',
             createdAt: session.user.created_at,
-            organizationId: profileData?.organization_id || null
+            organizationId: session.user.user_metadata?.organization_id || null
           });
         }
       } catch (error) {
@@ -76,23 +68,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
         console.log('User signed in:', session.user.email);
         
         try {
-          // Fetch user profile from profiles table
-          const { data: profileData, error: profileError } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', session.user.id)
-            .single();
-          
-          if (profileError && profileError.code !== 'PGRST116') {
-            console.error('Error fetching profile:', profileError);
-          }
-          
+          // Create a user object from the session data
           const userData: User = {
             id: session.user.id,
             email: session.user.email || '',
-            name: profileData?.name || session.user.email?.split('@')[0] || 'User',
+            name: session.user.user_metadata?.name || 
+                  session.user.user_metadata?.full_name || 
+                  session.user.email?.split('@')[0] || 'User',
             createdAt: session.user.created_at,
-            organizationId: profileData?.organization_id || null
+            organizationId: session.user.user_metadata?.organization_id || null
           };
           
           setUser(userData);
@@ -101,7 +85,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
             description: `Welcome${userData.name ? `, ${userData.name}` : ''}!`,
           });
         } catch (error) {
-          console.error('Error fetching user profile:', error);
+          console.error('Error handling auth state change:', error);
         } finally {
           setIsLoading(false);
         }
