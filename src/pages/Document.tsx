@@ -94,6 +94,17 @@ export default function Document() {
     return () => clearTimeout(timeout);
   }, [isLoading, document]);
 
+  // Add logging to check document object structure
+  React.useEffect(() => {
+    if (document) {
+      console.log("Document details:", {
+        id: document.id,
+        url: document.url,
+        original_url: document.original_url
+      });
+    }
+  }, [document]);
+
   if (isLoadingInternal) {
     return (
       <div className="container py-10 flex items-center justify-center">

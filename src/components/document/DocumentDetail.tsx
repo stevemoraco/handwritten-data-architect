@@ -1,3 +1,4 @@
+
 import * as React from "react";
 import { Document, ProcessingLog } from "@/types";
 import { Button } from "@/components/ui/button";
@@ -8,7 +9,6 @@ import { ExternalLink, FileText, MessageSquare, Code, AlertTriangle } from "luci
 import { PromptDisplay } from "./PromptDisplay";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
 
 interface DocumentDetailProps {
   document: Document;
@@ -28,8 +28,15 @@ export function DocumentDetail({ document, onProcess, logs = [] }: DocumentDetai
       if (document.original_url) {
         // Open the URL directly - no need for complex checks
         window.open(document.original_url, "_blank");
+        console.log("Opening document URL:", document.original_url);
       } else {
-        throw new Error("No original document URL available");
+        // If no original_url is available in the document object, try to construct one from url field
+        if (document.url) {
+          window.open(document.url, "_blank");
+          console.log("Opening document URL from url field:", document.url);
+        } else {
+          throw new Error("No original document URL available");
+        }
       }
     } catch (error) {
       console.error("Error opening document:", error);
@@ -50,7 +57,7 @@ export function DocumentDetail({ document, onProcess, logs = [] }: DocumentDetai
           <CardTitle className="flex justify-between items-center">
             {document.name}
             <div className="flex items-center space-x-2">
-              {document.original_url && (
+              {(document.original_url || document.url) && (
                 <Button
                   variant="outline"
                   size="sm"
