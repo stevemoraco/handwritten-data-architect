@@ -1,4 +1,3 @@
-
 import * as React from "react";
 import { FileUpload } from "@/components/ui/file-upload";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -286,9 +285,14 @@ export function DocumentUpload({
                 // Update UI immediately with initial state
                 updatePageProgress(uploadId, 0, 1); // Start with 0 of unknown (1 as placeholder) pages
                 
+                console.log(`Calling pdf-to-images function for document ${document.id} and user ${user.id}`);
+                
                 const { data: processingResult, error: processingError } = await supabase.functions
                   .invoke('pdf-to-images', {
-                    body: { documentId: document.id, userId: user.id }
+                    body: { 
+                      documentId: document.id, 
+                      userId: user.id 
+                    }
                   });
                 
                 if (processingError) {
@@ -297,6 +301,10 @@ export function DocumentUpload({
                 }
                 
                 console.log('Processing result:', processingResult);
+                
+                if (!processingResult || !processingResult.success) {
+                  throw new Error(processingResult?.error || "Unknown error in PDF processing");
+                }
                 
                 if (processingResult && processingResult.pageCount) {
                   pageCount = processingResult.pageCount;
