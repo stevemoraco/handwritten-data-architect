@@ -8,6 +8,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { MenuIcon } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
+import { LoginModal } from "@/components/auth/LoginModal";
 
 interface AppLayoutProps {
   children: ReactNode;
@@ -17,6 +18,7 @@ export function AppLayout({ children }: AppLayoutProps) {
   const { user, logout } = useAuth();
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false);
+  const [showLoginModal, setShowLoginModal] = React.useState(false);
 
   const navigationItems = [
     { name: "Dashboard", href: "/" },
@@ -87,8 +89,8 @@ export function AppLayout({ children }: AppLayoutProps) {
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : (
-              <Button asChild size="sm">
-                <Link to="/login">Login</Link>
+              <Button size="sm" onClick={() => setShowLoginModal(true)}>
+                Login
               </Button>
             )}
             <Button
@@ -144,6 +146,11 @@ export function AppLayout({ children }: AppLayoutProps) {
           </div>
         </div>
       </footer>
+      
+      <LoginModal 
+        open={showLoginModal} 
+        onOpenChange={setShowLoginModal} 
+      />
     </div>
   );
 }

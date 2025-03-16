@@ -1,4 +1,3 @@
-
 import * as React from "react";
 import { FileUpload } from "@/components/ui/file-upload";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,18 +5,11 @@ import { Button } from "@/components/ui/button";
 import { useUpload } from "@/context/UploadContext";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "@/components/ui/use-toast";
-import { ArrowRight, FileText, Lock, Shield, User, AlertTriangle } from "lucide-react";
-import { 
-  Dialog, 
-  DialogContent, 
-  DialogDescription, 
-  DialogHeader, 
-  DialogTitle 
-} from "@/components/ui/dialog";
-import { AuthForm } from "@/components/auth/AuthForm";
+import { ArrowRight, FileText, Shield, AlertTriangle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
+import { LoginModal } from "@/components/auth/LoginModal";
 
 interface DocumentUploadProps {
   onDocumentsUploaded?: (documentIds: string[]) => void;
@@ -35,14 +27,14 @@ export function DocumentUpload({
   const navigate = useNavigate();
   const [selectedFiles, setSelectedFiles] = React.useState<File[]>([]);
   const [uploadedDocumentIds, setUploadedDocumentIds] = React.useState<string[]>([]);
-  const [showAuthDialog, setShowAuthDialog] = React.useState(false);
+  const [showLoginModal, setShowLoginModal] = React.useState(false);
   const [isProcessing, setIsProcessing] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   const handleFilesSelected = (files: File[]) => {
     if (!user) {
       setSelectedFiles(files);
-      setShowAuthDialog(true);
+      setShowLoginModal(true);
       return;
     }
     
@@ -52,7 +44,7 @@ export function DocumentUpload({
   
   const startUpload = async (files: File[]) => {
     if (!user) {
-      setShowAuthDialog(true);
+      setShowLoginModal(true);
       return;
     }
     
@@ -64,7 +56,6 @@ export function DocumentUpload({
           const uploadId = addUpload(file.name);
           
           try {
-            // Create a document record in the database
             const { data: document, error: documentError } = await supabase
               .from('documents')
               .insert({
@@ -85,7 +76,6 @@ export function DocumentUpload({
               throw new Error('Document record not created');
             }
             
-            // Log the upload start
             await supabase.from('processing_logs').insert({
               document_id: document.id,
               action: 'Upload Started',
@@ -95,17 +85,14 @@ export function DocumentUpload({
             
             console.log(`Created document record with ID: ${document.id}`);
             
-            // Upload the file to storage
             const filePath = `${user.id}/${document.id}/${file.name}`;
             
-            // Upload file to storage with progress tracking
             const uploadOptions = {
               cacheControl: '3600'
             };
             
             let lastProgress = 0;
             
-            // Use XMLHttpRequest for upload with progress
             const xhr = new XMLHttpRequest();
             const uploadPromise = new Promise<void>((resolve, reject) => {
               xhr.upload.addEventListener('progress', (event) => {
@@ -136,13 +123,11 @@ export function DocumentUpload({
               });
             });
             
-            // Use Supabase upload without onUploadProgress
             const { error: uploadError } = await supabase.storage
               .from('document_files')
               .upload(filePath, file, uploadOptions);
             
             if (uploadError) {
-              // Update document status and log error
               await supabase
                 .from('documents')
                 .update({
@@ -163,12 +148,10 @@ export function DocumentUpload({
               throw new Error(`Failed to upload file: ${uploadError.message}`);
             }
             
-            // Get the public URL for the file
             const { data: publicURL } = supabase.storage
               .from('document_files')
               .getPublicUrl(filePath);
             
-            // Update document status and URL
             await supabase
               .from('documents')
               .update({
@@ -178,7 +161,6 @@ export function DocumentUpload({
               })
               .eq('id', document.id);
             
-            // Log upload success
             await supabase.from('processing_logs').insert({
               document_id: document.id,
               action: 'Upload Completed',
@@ -189,11 +171,9 @@ export function DocumentUpload({
             updateUploadStatus(uploadId, 'complete');
             console.log(`File uploaded successfully: ${file.name}`);
             
-            // Start document processing
             try {
               setIsProcessing(true);
               
-              // Call the document processing edge function
               const { data: processingResult, error: processingError } = await supabase.functions
                 .invoke('process-document', {
                   body: { documentId: document.id }
@@ -209,7 +189,6 @@ export function DocumentUpload({
               console.error('Error processing document:', processingError);
               setIsProcessing(false);
               
-              // Log processing error
               await supabase.from('processing_logs').insert({
                 document_id: document.id,
                 action: 'Processing Error',
@@ -217,7 +196,6 @@ export function DocumentUpload({
                 message: processingError.message || 'Unknown processing error'
               });
               
-              // Don't throw here to allow the document ID to be returned
               toast({
                 title: 'Processing Warning',
                 description: `Your file was uploaded but processing encountered an issue: ${processingError.message}`,
@@ -243,7 +221,6 @@ export function DocumentUpload({
         return [];
       });
       
-      // Filter out any failed uploads
       const successfulUploads = newDocumentIds.filter(id => id);
       
       if (successfulUploads.length > 0) {
@@ -269,19 +246,17 @@ export function DocumentUpload({
     if (onDocumentsUploaded && uploadedDocumentIds.length > 0) {
       onDocumentsUploaded(uploadedDocumentIds);
     } else if (uploadedDocumentIds.length > 0) {
-      // Navigate to document view if no callback is provided
       navigate(`/document/${uploadedDocumentIds[0]}`);
     }
   };
 
   const handleAuthComplete = () => {
-    setShowAuthDialog(false);
+    setShowLoginModal(false);
     toast({
       title: "Account created successfully",
       description: "You can now securely upload and process your documents.",
     });
     
-    // Start upload process if files were selected before authentication
     if (selectedFiles.length > 0) {
       startUpload(selectedFiles);
     }
@@ -357,35 +332,11 @@ export function DocumentUpload({
         </CardFooter>
       </Card>
 
-      <Dialog open={showAuthDialog} onOpenChange={setShowAuthDialog}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <User className="h-5 w-5" />
-              Create Your Secure Account
-            </DialogTitle>
-            <DialogDescription className="pt-2 pb-1">
-              <div className="space-y-2">
-                <p>
-                  Your documents contain valuable information. Creating an account ensures your data remains 
-                  secure and accessible only to you.
-                </p>
-                <div className="pt-1 flex flex-col space-y-1.5">
-                  <div className="flex items-start gap-2">
-                    <Lock className="h-4 w-4 mt-0.5 text-primary" />
-                    <span className="text-sm">End-to-end security for your sensitive documents</span>
-                  </div>
-                  <div className="flex items-start gap-2">
-                    <Shield className="h-4 w-4 mt-0.5 text-primary" />
-                    <span className="text-sm">Complete control over your data and processing history</span>
-                  </div>
-                </div>
-              </div>
-            </DialogDescription>
-          </DialogHeader>
-          <AuthForm onComplete={handleAuthComplete} />
-        </DialogContent>
-      </Dialog>
+      <LoginModal 
+        open={showLoginModal} 
+        onOpenChange={setShowLoginModal} 
+        onComplete={handleAuthComplete} 
+      />
     </>
   );
 }
