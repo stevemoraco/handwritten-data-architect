@@ -1,14 +1,14 @@
-
 import * as React from "react";
 import { Document, ProcessingLog } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { ExternalLink, FileText, MessageSquare, Code, AlertTriangle } from "lucide-react";
+import { ExternalLink, FileText, MessageSquare, Code, AlertTriangle, Loader2 } from "lucide-react";
 import { PromptDisplay } from "./PromptDisplay";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
 
 interface DocumentDetailProps {
   document: Document;
@@ -19,34 +19,103 @@ interface DocumentDetailProps {
 export function DocumentDetail({ document, onProcess, logs = [] }: DocumentDetailProps) {
   const [activeTab, setActiveTab] = React.useState("preview");
   const [isCheckingFile, setIsCheckingFile] = React.useState(false);
+  const [fileUrl, setFileUrl] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (document) {
+      fetchDocumentUrl();
+    }
+  }, [document]);
+
+  const fetchDocumentUrl = async () => {
+    try {
+      if (document.original_url) {
+        const response = await fetch(document.original_url, { method: 'HEAD' });
+        if (response.ok) {
+          setFileUrl(document.original_url);
+          return;
+        }
+      }
+      
+      if (document.url && document.url !== document.original_url) {
+        const response = await fetch(document.url, { method: 'HEAD' });
+        if (response.ok) {
+          setFileUrl(document.url);
+          return;
+        }
+      }
+      
+      if (document.userId) {
+        const pathWithId = `${document.userId}/${document.id}/original${document.type === 'pdf' ? '.pdf' : ''}`;
+        const { data: urlWithId } = supabase.storage
+          .from("document_files")
+          .getPublicUrl(pathWithId);
+          
+        if (urlWithId?.publicUrl) {
+          try {
+            const response = await fetch(urlWithId.publicUrl, { method: 'HEAD' });
+            if (response.ok) {
+              setFileUrl(urlWithId.publicUrl);
+              
+              await supabase
+                .from("documents")
+                .update({ original_url: urlWithId.publicUrl })
+                .eq("id", document.id);
+                
+              return;
+            }
+          } catch (error) {
+            console.error("Error checking reconstructed URL:", error);
+          }
+        }
+        
+        const filename = encodeURIComponent(document.name);
+        const pathWithName = `${document.userId}/uploads/${filename}`;
+        const { data: urlWithName } = supabase.storage
+          .from("document_files")
+          .getPublicUrl(pathWithName);
+          
+        if (urlWithName?.publicUrl) {
+          try {
+            const response = await fetch(urlWithName.publicUrl, { method: 'HEAD' });
+            if (response.ok) {
+              setFileUrl(urlWithName.publicUrl);
+              
+              await supabase
+                .from("documents")
+                .update({ original_url: urlWithName.publicUrl })
+                .eq("id", document.id);
+                
+              return;
+            }
+          } catch (error) {
+            console.error("Error checking alternative URL:", error);
+          }
+        }
+      }
+      
+      console.error("Could not find a valid URL for document:", document.id);
+    } catch (error) {
+      console.error("Error fetching document URL:", error);
+    }
+  };
 
   const handleViewOriginal = async () => {
     try {
       setIsCheckingFile(true);
       
-      // Extract the URL to use - logging it to help debug
-      console.log("Document details:", {
-        id: document.id,
-        original_url: document.original_url,
-        url: document.url
-      });
-      
-      // Try to find a working URL - always use original_url first
-      let documentUrl = document.original_url;
-      
-      // Check if the URL is available and properly formatted
-      if (!documentUrl) {
-        console.log("No original_url available, using url as fallback");
-        documentUrl = document.url;
+      if (fileUrl) {
+        window.open(fileUrl, "_blank");
+        return;
       }
       
-      // Final check
-      if (!documentUrl) {
-        throw new Error("No valid document URL available");
-      }
+      await fetchDocumentUrl();
       
-      console.log("Opening document URL:", documentUrl);
-      window.open(documentUrl, "_blank");
+      if (fileUrl) {
+        window.open(fileUrl, "_blank");
+      } else {
+        throw new Error("Could not retrieve a valid document URL");
+      }
     } catch (error) {
       console.error("Error opening document:", error);
       toast({
@@ -66,17 +135,24 @@ export function DocumentDetail({ document, onProcess, logs = [] }: DocumentDetai
           <CardTitle className="flex justify-between items-center">
             {document.name}
             <div className="flex items-center space-x-2">
-              {(document.original_url || document.url) && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleViewOriginal}
-                  disabled={isCheckingFile}
-                >
-                  <ExternalLink className="h-4 w-4 mr-2" />
-                  {isCheckingFile ? "Loading..." : "View Original"}
-                </Button>
-              )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleViewOriginal}
+                disabled={isCheckingFile}
+              >
+                {isCheckingFile ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Checking...
+                  </>
+                ) : (
+                  <>
+                    <ExternalLink className="h-4 w-4 mr-2" />
+                    View Original
+                  </>
+                )}
+              </Button>
               {document.status !== "processed" && onProcess && (
                 <Button size="sm" onClick={() => onProcess(document.id)}>
                   Process
@@ -162,15 +238,23 @@ export function DocumentDetail({ document, onProcess, logs = [] }: DocumentDetai
               ) : (
                 <div className="text-center text-muted-foreground py-8 flex flex-col items-center">
                   <p className="mb-4">No preview thumbnails available</p>
-                  {(document.original_url || document.url) && (
-                    <Button
-                      variant="outline"
-                      onClick={handleViewOriginal}
-                    >
-                      <ExternalLink className="h-4 w-4 mr-2" />
-                      View Original Document
-                    </Button>
-                  )}
+                  <Button
+                    variant="outline"
+                    onClick={handleViewOriginal}
+                    disabled={isCheckingFile}
+                  >
+                    {isCheckingFile ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Checking...
+                      </>
+                    ) : (
+                      <>
+                        <ExternalLink className="h-4 w-4 mr-2" />
+                        View Original Document
+                      </>
+                    )}
+                  </Button>
                 </div>
               )}
             </CardContent>

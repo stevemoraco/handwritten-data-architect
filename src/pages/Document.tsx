@@ -8,6 +8,7 @@ import { ArrowLeft, Loader2 } from "lucide-react";
 import { getProcessingLogs } from "@/services/documentService";
 import { ProcessingLog } from "@/types";
 import { toast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
 
 export default function Document() {
   const { documentId } = useParams<{ documentId: string }>();
@@ -18,8 +19,82 @@ export default function Document() {
   const [documentLoaded, setDocumentLoaded] = React.useState(false);
 
   const document = React.useMemo(() => {
-    return documents.find(doc => doc.id === documentId);
+    const doc = documents.find(doc => doc.id === documentId);
+    if (doc) {
+      // Log document details to help debug URL issues
+      console.log("Document details found:", {
+        id: doc.id,
+        name: doc.name,
+        original_url: doc.original_url,
+        url: doc.url,
+        status: doc.status,
+        thumbnails: doc.thumbnails?.length || 0
+      });
+    }
+    return doc;
   }, [documents, documentId]);
+
+  // Function to update document URLs if they're missing
+  const validateDocumentUrls = React.useCallback(async () => {
+    if (!document || !documentId) return;
+    
+    // If both URLs are missing, try to update them
+    if (!document.original_url && !document.url) {
+      try {
+        console.log("Attempting to fix missing document URLs for:", documentId);
+        
+        // Try with document id path (newer format)
+        if (document.userId) {
+          const pathWithId = `${document.userId}/${document.id}/original${document.type === 'pdf' ? '.pdf' : ''}`;
+          const { data: urlWithId } = supabase.storage
+            .from("document_files")
+            .getPublicUrl(pathWithId);
+            
+          if (urlWithId?.publicUrl) {
+            console.log("Found URL with document ID path:", urlWithId.publicUrl);
+            
+            // Update the document record with the correct URL
+            await supabase
+              .from("documents")
+              .update({ 
+                original_url: urlWithId.publicUrl,
+                url: urlWithId.publicUrl 
+              })
+              .eq("id", document.id);
+              
+            // Refresh documents to get updated URLs
+            fetchUserDocuments();
+            return;
+          }
+          
+          // Try with uploads path (older format)
+          const filename = encodeURIComponent(document.name);
+          const pathWithName = `${document.userId}/uploads/${filename}`;
+          const { data: urlWithName } = supabase.storage
+            .from("document_files")
+            .getPublicUrl(pathWithName);
+            
+          if (urlWithName?.publicUrl) {
+            console.log("Found URL with uploads path:", urlWithName.publicUrl);
+            
+            // Update the document record with the correct URL
+            await supabase
+              .from("documents")
+              .update({ 
+                original_url: urlWithName.publicUrl,
+                url: urlWithName.publicUrl
+              })
+              .eq("id", document.id);
+              
+            // Refresh documents to get updated URLs
+            fetchUserDocuments();
+          }
+        }
+      } catch (error) {
+        console.error("Error fixing document URLs:", error);
+      }
+    }
+  }, [document, documentId, fetchUserDocuments]);
 
   React.useEffect(() => {
     const loadDocumentData = async () => {
@@ -41,6 +116,9 @@ export default function Document() {
         await fetchUserDocuments();
         setDocumentLoaded(true);
         
+        // If document URLs are missing, try to fix them
+        await validateDocumentUrls();
+        
         await fetchLogs(documentId);
         clearTimeout(timeout);
       } catch (error) {
@@ -54,7 +132,7 @@ export default function Document() {
     };
     
     loadDocumentData();
-  }, [documentId]);
+  }, [documentId, fetchUserDocuments, validateDocumentUrls]);
 
   const fetchLogs = async (docId: string) => {
     setLogsLoading(true);
@@ -93,20 +171,6 @@ export default function Document() {
     
     return () => clearTimeout(timeout);
   }, [isLoading, document]);
-
-  // Add more detailed logging to check document object structure
-  React.useEffect(() => {
-    if (document) {
-      console.log("Document details for view:", {
-        id: document.id,
-        name: document.name,
-        original_url: document.original_url,
-        url: document.url,
-        status: document.status,
-        thumbnails: document.thumbnails?.length || 0
-      });
-    }
-  }, [document]);
 
   if (isLoadingInternal) {
     return (
