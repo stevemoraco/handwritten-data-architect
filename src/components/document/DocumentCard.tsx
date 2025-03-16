@@ -97,7 +97,7 @@ export function DocumentCard({
       
       {document.thumbnails && document.thumbnails.length > 0 && (
         <CardContent className="p-0">
-          <ScrollArea orientation="horizontal" className="w-full">
+          <ScrollArea className="w-full">
             <div className="flex p-4 gap-3">
               {document.thumbnails.map((url, index) => (
                 <div

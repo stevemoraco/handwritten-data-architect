@@ -116,3 +116,30 @@ export interface UploadProgress {
   status: 'uploading' | 'processing' | 'complete' | 'error';
   message?: string;
 }
+
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp: string;
+}
+
+export interface AIProcessingStep {
+  id: string;
+  name: string;
+  description: string;
+  status: 'waiting' | 'in_progress' | 'completed' | 'failed';
+  progress?: number;
+  result?: any;
+  error?: string;
+  timestamp: string;
+}
+
+export interface GeminiPrompt {
+  documentId?: string;
+  pipelineId?: string;
+  prompt: string;
+  context?: string;
+  includeImages?: boolean;
+  includeTranscription?: boolean;
+}
