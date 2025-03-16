@@ -1,4 +1,3 @@
-
 import * as React from "react";
 import { FileUpload } from "@/components/ui/file-upload";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -76,6 +75,27 @@ export function DocumentUpload({
     setError(null);
     
     try {
+      // First, ensure the document_files bucket exists
+      try {
+        const { data: bucketData, error: bucketError } = await supabase.storage.getBucket('document_files');
+        
+        if (bucketError && bucketError.message.includes('not found')) {
+          console.log("Document files bucket not found, creating it...");
+          const { error: createError } = await supabase.storage.createBucket('document_files', {
+            public: true,
+            fileSizeLimit: 50000000 // 50MB
+          });
+          
+          if (createError) {
+            throw new Error(`Failed to create document_files bucket: ${createError.message}`);
+          }
+          console.log("document_files bucket created successfully");
+        }
+      } catch (bucketError) {
+        console.error("Error checking/creating bucket:", bucketError);
+        // Continue with upload even if bucket check fails
+      }
+
       const newDocumentIds = await Promise.all(
         files.map(async (file) => {
           // Check for duplicates before uploading
@@ -177,11 +197,19 @@ export function DocumentUpload({
               .upload(filePath, file, uploadOptions);
             
             if (uploadError) {
+              console.error("Detailed upload error:", JSON.stringify({
+                message: uploadError.message,
+                name: uploadError.name,
+                details: uploadError.details,
+                hint: uploadError.hint,
+                code: uploadError.code
+              }, null, 2));
+              
               await supabase
                 .from('documents')
                 .update({
                   status: 'failed',
-                  processing_error: uploadError.message,
+                  processing_error: `Upload failed: ${uploadError.message}${uploadError.hint ? ` (${uploadError.hint})` : ''}`,
                   updated_at: new Date().toISOString()
                 })
                 .eq('id', document.id);

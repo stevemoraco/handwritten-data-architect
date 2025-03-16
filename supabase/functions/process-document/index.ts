@@ -85,6 +85,21 @@ serve(async (req) => {
     } catch (operationError) {
       console.error(`Error in ${operation} operation:`, operationError);
       
+      // Enhanced error logging with complete error details
+      const errorDetails = {
+        message: operationError.message || "Unknown error",
+        stack: operationError.stack,
+        name: operationError.name,
+        operation,
+        documentId,
+        schemaId,
+        model,
+        context: operationError.context || {},
+        timestamp: new Date().toISOString()
+      };
+      
+      console.error("FULL ERROR DETAILS:", JSON.stringify(errorDetails, null, 2));
+      
       // Log error
       if (documentId) {
         await supabase
@@ -93,7 +108,7 @@ serve(async (req) => {
             document_id: documentId,
             action: `Gemini ${operation}`,
             status: 'error',
-            message: operationError.message || `Error in ${operation} operation`
+            message: JSON.stringify(errorDetails)
           });
       }
       
@@ -102,11 +117,20 @@ serve(async (req) => {
   } catch (error) {
     console.error("Error processing document:", error);
     
+    // Enhanced error response with complete error details
+    const detailedError = {
+      success: false,
+      error: error.message || "An unknown error occurred",
+      errorName: error.name,
+      errorStack: error.stack,
+      errorContext: error.context || {},
+      timestamp: new Date().toISOString()
+    };
+    
+    console.error("DETAILED ERROR RESPONSE:", JSON.stringify(detailedError, null, 2));
+    
     return new Response(
-      JSON.stringify({ 
-        success: false, 
-        error: error.message || "An unknown error occurred"
-      }),
+      JSON.stringify(detailedError),
       { 
         headers: { 
           ...corsHeaders, 

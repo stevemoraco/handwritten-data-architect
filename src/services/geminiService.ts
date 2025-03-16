@@ -1,4 +1,3 @@
-
 import { GeminiPrompt } from "@/types";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -26,6 +25,43 @@ export const checkDuplicateDocument = async (name: string, size: number, userId:
   }
 };
 
+// Store prompts for later retrieval
+export const storePromptForDocument = async (documentId: string, promptType: string, promptText: string): Promise<void> => {
+  try {
+    await supabase
+      .from("document_prompts")
+      .insert({
+        document_id: documentId,
+        prompt_type: promptType,
+        prompt_text: promptText,
+        created_at: new Date().toISOString()
+      });
+  } catch (error) {
+    console.error("Error storing prompt:", error);
+  }
+};
+
+// Retrieve prompts for a document
+export const getPromptsForDocument = async (documentId: string): Promise<any[]> => {
+  try {
+    const { data, error } = await supabase
+      .from("document_prompts")
+      .select("*")
+      .eq("document_id", documentId)
+      .order("created_at", { ascending: false });
+      
+    if (error) {
+      console.error("Error fetching prompts:", error);
+      return [];
+    }
+    
+    return data || [];
+  } catch (error) {
+    console.error("Error retrieving prompts:", error);
+    return [];
+  }
+};
+
 // Process prompt with Gemini using our edge function
 export const processWithGemini = async (prompt: GeminiPrompt): Promise<string> => {
   console.log("Processing with Gemini:", prompt);
@@ -46,6 +82,9 @@ export const processWithGemini = async (prompt: GeminiPrompt): Promise<string> =
         prompt: prompt.prompt
       };
       console.log("Using Gemini 2.0 Flash Lite for transcription");
+      
+      // Store the transcription prompt
+      await storePromptForDocument(prompt.documentId, "transcription", prompt.prompt);
     } else if (prompt.prompt.includes("schema")) {
       operation = 'generateSchema';
       body = {
@@ -56,14 +95,20 @@ export const processWithGemini = async (prompt: GeminiPrompt): Promise<string> =
         includeTranscription: prompt.includeTranscription
       };
       
-      // After schema generation, create a pipeline automatically
+      // Store the schema generation prompt
       if (prompt.documentIds && prompt.documentIds.length > 0) {
+        for (const docId of prompt.documentIds) {
+          await storePromptForDocument(docId, "schema_generation", prompt.prompt);
+        }
+        
         try {
           await createPipelineForDocuments(prompt.documentIds);
         } catch (pipelineError) {
           console.error("Error creating pipeline:", pipelineError);
           // Continue with schema generation even if pipeline creation fails
         }
+      } else {
+        await storePromptForDocument(prompt.documentId, "schema_generation", prompt.prompt);
       }
     } else if (prompt.prompt.includes("extract data")) {
       operation = 'extractData';
@@ -74,12 +119,23 @@ export const processWithGemini = async (prompt: GeminiPrompt): Promise<string> =
         model: "gemini-2.0-flash-lite",  // Updated to the latest model
         includeImages: prompt.includeImages
       };
+      
+      // Store the data extraction prompt
+      await storePromptForDocument(prompt.documentId, "data_extraction", prompt.prompt);
     }
     
     console.log(`Calling edge function ${endpoint} with operation ${operation}`, body);
     
     // Call the edge function
-    const response = await supabase.functions.invoke(endpoint, { body });
+    const response = await supabase.functions.invoke(endpoint, { 
+      body,
+      headers: {
+        'Content-Type': 'application/json',
+      }
+    });
+    
+    // Log the full response for debugging
+    console.log("Full response from edge function:", JSON.stringify(response, null, 2));
     
     // Improved error handling - check for null response
     if (!response || !response.data) {
@@ -88,9 +144,18 @@ export const processWithGemini = async (prompt: GeminiPrompt): Promise<string> =
     }
     
     if (!response.data.success) {
-      const errorMessage = response.data?.error || `Unknown error in ${operation}`;
-      console.error(`Error in ${operation}:`, errorMessage);
-      throw new Error(errorMessage);
+      const errorObj = response.data;
+      console.error(`Error in ${operation}:`, errorObj);
+      
+      // Create a more detailed error message
+      const errorMessage = errorObj.error || `Unknown error in ${operation}`;
+      const errorDetails = errorObj.errorName ? `${errorObj.errorName}: ${errorMessage}` : errorMessage;
+      const fullErrorInfo = errorObj.errorStack ? `${errorDetails}\n${errorObj.errorStack}` : errorDetails;
+      
+      // Store error details
+      await storePromptForDocument(prompt.documentId, "error", fullErrorInfo);
+      
+      throw new Error(fullErrorInfo);
     }
     
     console.log(`Received successful response from ${operation}`, response.data);
