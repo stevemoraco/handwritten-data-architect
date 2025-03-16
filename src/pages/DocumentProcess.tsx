@@ -1,11 +1,10 @@
-
 import * as React from "react";
 import { useNavigate } from "react-router-dom";
 import { DocumentUpload } from "@/components/document/DocumentUpload";
 import { ProcessingSteps } from "@/components/document/ProcessingSteps";
 import { SchemaDetail } from "@/components/schema/SchemaDetail";
 import { SchemaChat } from "@/components/schema/SchemaChat";
-import { AIProcessingStep, DocumentSchema } from "@/types";
+import { AIProcessingStep, DocumentSchema, SchemaSuggestion } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -15,7 +14,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/context/AuthContext";
 
-// Mock page details for simulation
 const generateMockPages = (pageCount: number) => {
   return Array.from({ length: pageCount }).map((_, i) => ({
     pageNumber: i + 1,
@@ -107,11 +105,10 @@ export default function DocumentProcess() {
         processedDocuments: documentIds.length
       }));
       
-      // Create initial document details
       const initialDocDetails = documents.map(doc => ({
         id: doc.id,
         name: doc.name,
-        pageCount: doc.page_count || 5, // Use actual page count or default to 5
+        pageCount: doc.page_count || 5,
         processedPages: 0,
         status: "waiting" as const,
         pages: generateMockPages(doc.page_count || 5),
@@ -175,7 +172,6 @@ export default function DocumentProcess() {
     );
   };
 
-  // Simulate document transcription process with realistic timing
   const simulateDocumentTranscription = async () => {
     updateStepStatus("Document Transcription", "in_progress", 0);
     setProcessStats(prev => ({ ...prev, processedDocuments: 0 }));
@@ -185,35 +181,26 @@ export default function DocumentProcess() {
     let totalPages = 0;
     let processedPages = 0;
     
-    // Calculate total pages
     documentDetails.forEach(doc => {
       totalPages += doc.pageCount;
     });
     
-    // Process each document
     for (const doc of documentDetails) {
       console.log(`Starting transcription of document: ${doc.name}`);
       updateDocumentStatus(doc.id, "processing", 0);
       
-      // Process pages for this document
       for (let i = 0; i < doc.pages.length; i++) {
         const pageNumber = i + 1;
         const page = doc.pages[i];
         
-        // Update page to processing
         updatePageStatus(doc.id, pageNumber, "processing");
         
-        // Simulate processing time (2-4 seconds per page)
         const processingTime = 2000 + Math.random() * 2000;
         await new Promise(resolve => setTimeout(resolve, processingTime));
         
-        // Generate a random thumbnail (placeholder)
         const dummyThumbnail = `https://via.placeholder.com/800x1000?text=Page+${pageNumber}`;
-        
-        // Generate dummy text content
         const dummyText = `This is extracted text from page ${pageNumber} of document ${doc.name}. The content appears to include several paragraphs of information that have been successfully extracted using OCR technology.`;
         
-        // Randomly simulate a failure (5% chance)
         const shouldFail = Math.random() < 0.05;
         
         if (shouldFail) {
@@ -222,7 +209,6 @@ export default function DocumentProcess() {
           });
           console.log(`Failed to process page ${pageNumber} of document ${doc.id}`);
         } else {
-          // Update page to completed with thumbnail and text
           updatePageStatus(doc.id, pageNumber, "completed", {
             thumbnail: dummyThumbnail,
             text: dummyText
@@ -230,10 +216,8 @@ export default function DocumentProcess() {
           console.log(`Processed page ${pageNumber} of document ${doc.id}`);
         }
         
-        // Update document processed pages count
         updateDocumentStatus(doc.id, "processing", i + 1);
         
-        // Update global progress
         processedPages++;
         const transcriptionProgress = (processedPages / totalPages) * 100;
         updateStepStatus("Document Transcription", "in_progress", transcriptionProgress);
@@ -244,13 +228,11 @@ export default function DocumentProcess() {
         }));
       }
       
-      // Mark document as completed
       updateDocumentStatus(doc.id, "completed", doc.pageCount);
       processedDocs++;
       
       console.log(`Completed transcription of document: ${doc.name}`);
       
-      // Add document thumbnail (first page)
       const firstPageWithThumbnail = doc.pages.find(p => p.status === "completed" && p.thumbnail);
       if (firstPageWithThumbnail) {
         setDocumentDetails(prev => 
@@ -266,11 +248,9 @@ export default function DocumentProcess() {
     updateStepStatus("Document Transcription", "completed");
     console.log("Document transcription completed");
     
-    // Move to schema generation next
     simulateSchemaGeneration();
   };
 
-  // Simulate schema generation process
   const simulateSchemaGeneration = async () => {
     updateStepStatus("Schema Generation", "in_progress", 0);
     setProcessStats(prev => ({ ...prev, processedDocuments: 0 }));
@@ -278,7 +258,6 @@ export default function DocumentProcess() {
     const totalDocs = documentDetails.length;
     let processedDocs = 0;
     
-    // Reset document statuses for schema generation
     setDocumentDetails(prev => 
       prev.map(doc => ({
         ...doc,
@@ -286,20 +265,16 @@ export default function DocumentProcess() {
       }))
     );
     
-    // Process each document for schema generation
     for (const doc of documentDetails) {
       console.log(`Analyzing document for schema: ${doc.name}`);
       updateDocumentStatus(doc.id, "processing");
       
-      // Simulate processing time (3-6 seconds per document)
       const processingTime = 3000 + Math.random() * 3000;
       await new Promise(resolve => setTimeout(resolve, processingTime));
       
-      // Mark document as completed
       updateDocumentStatus(doc.id, "completed");
       processedDocs++;
       
-      // Update progress
       const schemaProgress = (processedDocs / totalDocs) * 100;
       updateStepStatus("Schema Generation", "in_progress", schemaProgress);
       
@@ -318,15 +293,24 @@ export default function DocumentProcess() {
     updateStepStatus("Schema Generation", "completed");
     console.log("Schema generation completed");
     
-    // Create mock schema
     const mockSchema: DocumentSchema = {
       id: uuidv4(),
       name: `Schema for ${totalDocs} document(s)`,
       description: "Automatically generated schema based on document content",
       rationale: "Basic document information schema with intelligent field mapping",
       suggestions: [
-        "Consider adding a 'category' field to classify documents",
-        "Date formats should be standardized across all documents"
+        {
+          id: uuidv4(),
+          description: "Consider adding a 'category' field to classify documents",
+          type: "add",
+          impact: "Improves document organization and searchability"
+        },
+        {
+          id: uuidv4(),
+          description: "Date formats should be standardized across all documents",
+          type: "modify",
+          impact: "Ensures consistency in date handling across the system"
+        }
       ],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -425,7 +409,6 @@ export default function DocumentProcess() {
     
     setGeneratedSchema(mockSchema);
     
-    // Move to schema refinement
     updateStepStatus("Schema Refinement", "in_progress");
     setActiveTab("schema");
   };
@@ -441,7 +424,6 @@ export default function DocumentProcess() {
     }
     
     try {
-      // Start the realistic document processing simulation
       simulateDocumentTranscription();
     } catch (error) {
       console.error("Error in document processing:", error);
