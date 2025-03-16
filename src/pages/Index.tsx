@@ -63,7 +63,7 @@ export default function Index() {
         <div className="container space-y-3 max-w-3xl">
           <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight">Handwriting Digitizer</h1>
           <p className="text-xl text-muted-foreground">
-            Transform handwritten medical and legal documents into structured digital data with our AI-powered solution.
+            Transform hundreds or thousands of handwritten documents into structured tables for a cent per page.
           </p>
         </div>
       </section>
