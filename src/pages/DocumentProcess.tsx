@@ -27,7 +27,7 @@ const generateMockPages = (pageCount: number) => {
 export default function DocumentProcess() {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { user } = useAuth();
+  const { user, isLoading } = useAuth();
   const [uploadedDocumentIds, setUploadedDocumentIds] = React.useState<string[]>([]);
   const [steps, setSteps] = React.useState<AIProcessingStep[]>([
     {
@@ -73,15 +73,22 @@ export default function DocumentProcess() {
   const [documentDetails, setDocumentDetails] = React.useState<any[]>([]);
 
   React.useEffect(() => {
-    if (!user && !user?.id) {
-      toast({
-        title: "Authentication required",
-        description: "Please log in to access this page",
-        variant: "destructive"
-      });
-      navigate("/");
-    }
-  }, [user, navigate, toast]);
+    const checkAuth = async () => {
+      if (!isLoading && !user) {
+        console.log("Auth check failed: User not authenticated");
+        toast({
+          title: "Authentication required",
+          description: "Please log in to access this page",
+          variant: "destructive"
+        });
+        navigate("/");
+      } else if (user) {
+        console.log("Auth check passed: User authenticated", user.email);
+      }
+    };
+
+    checkAuth();
+  }, [user, isLoading, navigate, toast]);
 
   const handleDocumentsUploaded = async (documentIds: string[]) => {
     if (!documentIds.length) return;
@@ -471,6 +478,21 @@ export default function DocumentProcess() {
       setActiveTab("schema");
     }
   };
+
+  if (isLoading) {
+    return (
+      <div className="container py-20 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Verifying authentication...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return null;
+  }
 
   return (
     <div className="container py-10 space-y-6">

@@ -13,7 +13,7 @@ import { useUpload } from "@/context/UploadContext";
 import { AppLayout } from "@/components/layout/AppLayout";
 
 export default function Index() {
-  const { user } = useAuth();
+  const { user, isLoading } = useAuth();
   const navigate = useNavigate();
   const [showLoginModal, setShowLoginModal] = React.useState(false);
   const [activeStep, setActiveStep] = React.useState<"upload" | "account" | "invite">("upload");
@@ -21,10 +21,12 @@ export default function Index() {
   const { uploads } = useUpload();
   
   React.useEffect(() => {
-    if (user) {
+    // Only redirect after loading is complete and we know user is authenticated
+    if (!isLoading && user) {
+      console.log("User authenticated on Index page, redirecting to process page:", user.email);
       navigate("/process");
     }
-  }, [user, navigate]);
+  }, [user, navigate, isLoading]);
   
   const handleStartProcessing = () => {
     if (!user) {
