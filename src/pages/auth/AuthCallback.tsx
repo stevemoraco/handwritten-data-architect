@@ -1,5 +1,4 @@
-
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Loader2 } from 'lucide-react';
@@ -7,13 +6,40 @@ import { Loader2 } from 'lucide-react';
 export default function AuthCallback() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const [error, setError] = useState<string | null>(null);
   const redirectTo = searchParams.get('redirectTo') || '/';
 
   useEffect(() => {
     // Handle the OAuth callback
     const handleAuthCallback = async () => {
       try {
-        // Get hash parameters including access token
+        // Check if we have a session
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        
+        if (sessionError) {
+          console.error('Error getting session:', sessionError);
+          throw sessionError;
+        }
+        
+        if (session) {
+          console.log('Session found, redirecting to:', redirectTo);
+          
+          // If we're in a popup, send message to parent window
+          if (window.opener) {
+            window.opener.postMessage({ 
+              type: 'SUPABASE_AUTH_CALLBACK', 
+              session 
+            }, window.location.origin);
+            window.close();
+            return;
+          }
+          
+          // Otherwise, redirect in the current window
+          navigate(redirectTo, { replace: true });
+          return;
+        }
+        
+        // No session yet, so use the URL params to set the session
         const hashParams = Object.fromEntries(
           window.location.hash
             .substring(1)
@@ -30,30 +56,78 @@ export default function AuthCallback() {
 
           if (error) {
             console.error('Error setting session:', error);
-            navigate('/auth?error=Unable to sign in', { replace: true });
-            return;
+            throw error;
           }
 
           console.log('Auth callback successful, redirecting to:', redirectTo);
+          
+          // If we're in a popup, send message to parent window
+          if (window.opener) {
+            window.opener.postMessage({ 
+              type: 'SUPABASE_AUTH_CALLBACK', 
+              success: true 
+            }, window.location.origin);
+            window.close();
+            return;
+          }
+          
+          // Otherwise, redirect in the current window
           navigate(redirectTo, { replace: true });
         } else {
-          // No access token found in the URL
-          navigate('/auth?error=No authentication data received', { replace: true });
+          // Check the query params for error
+          const errorDesc = searchParams.get('error_description') || searchParams.get('error') || 'No authentication data received';
+          console.error('Auth error:', errorDesc);
+          setError(errorDesc);
+          
+          // If we're in a popup, send error message to parent window
+          if (window.opener) {
+            window.opener.postMessage({ 
+              type: 'SUPABASE_AUTH_CALLBACK', 
+              error: errorDesc 
+            }, window.location.origin);
+            window.close();
+            return;
+          }
+          
+          // Otherwise, redirect to auth page with error
+          navigate(`/auth?error=${encodeURIComponent(errorDesc)}`, { replace: true });
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error('Error in auth callback:', error);
-        navigate('/auth?error=Authentication error', { replace: true });
+        setError(error.message || 'Authentication error');
+        
+        // If we're in a popup, send error message to parent window
+        if (window.opener) {
+          window.opener.postMessage({ 
+            type: 'SUPABASE_AUTH_CALLBACK', 
+            error: error.message || 'Authentication error'
+          }, window.location.origin);
+          window.close();
+          return;
+        }
+        
+        // Otherwise, redirect to auth page with error
+        navigate(`/auth?error=${encodeURIComponent(error.message || 'Authentication error')}`, { replace: true });
       }
     };
 
     handleAuthCallback();
-  }, [navigate, redirectTo]);
+  }, [navigate, redirectTo, searchParams]);
 
   return (
     <div className="flex items-center justify-center min-h-screen">
       <div className="flex flex-col items-center gap-2">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <p className="text-lg">Completing authentication...</p>
+        {error ? (
+          <>
+            <p className="text-destructive text-lg">Authentication Error</p>
+            <p className="text-muted-foreground">{error}</p>
+          </>
+        ) : (
+          <>
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <p className="text-lg">Completing authentication...</p>
+          </>
+        )}
       </div>
     </div>
   );

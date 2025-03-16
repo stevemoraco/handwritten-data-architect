@@ -1,14 +1,15 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Shield, Mail, Lock, User, Loader2 } from 'lucide-react';
+import { Shield, Mail, Lock, User, Loader2, AlertCircle } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
 export default function AuthPage() {
   const [activeTab, setActiveTab] = useState<string>('signin');
@@ -20,10 +21,35 @@ export default function AuthPage() {
   const { user, isLoading, signInWithEmail, signUpWithEmail, signInWithGoogle } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   
   // Get redirect path from URL query params or use default
-  const searchParams = new URLSearchParams(location.search);
   const redirectTo = searchParams.get('redirectTo') || '/';
+  const errorMessage = searchParams.get('error');
+  
+  useEffect(() => {
+    // Set up listener for auth callback from popup
+    const handleAuthCallback = (event: MessageEvent) => {
+      if (
+        event.origin === window.location.origin && 
+        event.data && 
+        event.data.type === 'SUPABASE_AUTH_CALLBACK'
+      ) {
+        if (event.data.error) {
+          console.error('Auth callback error:', event.data.error);
+        } else {
+          console.log('Auth callback successful, redirecting');
+          // We'll let the auth state change handler in AuthContext take care of redirection
+        }
+      }
+    };
+    
+    window.addEventListener('message', handleAuthCallback);
+    
+    return () => {
+      window.removeEventListener('message', handleAuthCallback);
+    };
+  }, [navigate, redirectTo]);
   
   useEffect(() => {
     // Redirect to home/dashboard if already logged in
@@ -68,9 +94,9 @@ export default function AuthPage() {
     try {
       setIsSubmitting(true);
       await signInWithGoogle();
+      // We'll handle the redirect in the callback
     } catch (error) {
       console.error('Google sign in error:', error);
-    } finally {
       setIsSubmitting(false);
     }
   };
@@ -96,6 +122,16 @@ export default function AuthPage() {
               {activeTab === 'signin' ? 'Sign in to your account' : 'Create a new account'}
             </CardDescription>
           </CardHeader>
+          
+          {errorMessage && (
+            <div className="px-6">
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertTitle>Authentication Error</AlertTitle>
+                <AlertDescription>{errorMessage}</AlertDescription>
+              </Alert>
+            </div>
+          )}
           
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
             <TabsList className="grid grid-cols-2 w-full">

@@ -3,7 +3,7 @@ export interface User {
   email: string;
   name: string;
   createdAt: string;
-  organizationId: string;
+  organizationId: string | null;
 }
 
 export interface Organization {

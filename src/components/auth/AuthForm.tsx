@@ -22,7 +22,7 @@ export function AuthForm({ onComplete, redirectPath = "/process", initialView = 
   const [name, setName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   
-  const { login, register, user, signInWithGoogle } = useAuth();
+  const { signInWithEmail, signUpWithEmail, user, signInWithGoogle, forgotPassword } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -44,7 +44,7 @@ export function AuthForm({ onComplete, redirectPath = "/process", initialView = 
     setIsSubmitting(true);
     
     try {
-      await login(email, password);
+      await signInWithEmail(email, password);
       console.log("Login successful, redirecting to:", redirectPath);
       
       if (onComplete) {
@@ -54,11 +54,6 @@ export function AuthForm({ onComplete, redirectPath = "/process", initialView = 
       }
     } catch (error) {
       console.error("Login error:", error);
-      toast({
-        title: "Login failed",
-        description: error instanceof Error ? error.message : "An unknown error occurred. Please try again.",
-        variant: "destructive",
-      });
       setIsSubmitting(false);
     }
   };
@@ -71,7 +66,7 @@ export function AuthForm({ onComplete, redirectPath = "/process", initialView = 
     setIsSubmitting(true);
     
     try {
-      await register(name, email, password);
+      await signUpWithEmail(email, password, name);
       console.log("Registration successful, redirecting to:", redirectPath);
       
       if (onComplete) {
@@ -81,11 +76,6 @@ export function AuthForm({ onComplete, redirectPath = "/process", initialView = 
       }
     } catch (error) {
       console.error("Register error:", error);
-      toast({
-        title: "Registration failed",
-        description: error instanceof Error ? error.message : "An unknown error occurred. Please try again.",
-        variant: "destructive",
-      });
       setIsSubmitting(false);
     }
   };
@@ -104,21 +94,11 @@ export function AuthForm({ onComplete, redirectPath = "/process", initialView = 
     
     setIsSubmitting(true);
     
-    const { forgotPassword } = useAuth();
-    
     forgotPassword(email)
       .then(() => {
         toast({
           title: "Password reset email sent",
           description: "If an account exists with this email, you'll receive a password reset link.",
-        });
-      })
-      .catch((error) => {
-        console.error("Forgot password error:", error);
-        toast({
-          title: "Password reset failed",
-          description: error instanceof Error ? error.message : "An unknown error occurred. Please try again.",
-          variant: "destructive",
         });
       })
       .finally(() => {
