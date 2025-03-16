@@ -1,0 +1,118 @@
+
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  createdAt: string;
+  organizationId: string;
+}
+
+export interface Organization {
+  id: string;
+  name: string;
+  createdAt: string;
+  ownerId: string;
+}
+
+export interface Invitation {
+  id: string;
+  email: string;
+  organizationId: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  createdAt: string;
+}
+
+export interface Document {
+  id: string;
+  name: string;
+  type: 'pdf' | 'image';
+  status: 'uploaded' | 'processing' | 'processed' | 'failed';
+  url: string;
+  thumbnails?: string[];
+  pageCount?: number;
+  transcription?: string;
+  createdAt: string;
+  updatedAt: string;
+  userId: string;
+  organizationId: string;
+  pipelineId?: string;
+}
+
+export interface DocumentSchema {
+  id: string;
+  name: string;
+  structure: SchemaTable[];
+  description: string;
+  rationale: string;
+  suggestions: SchemaSuggestion[];
+  createdAt: string;
+  updatedAt: string;
+  organizationId: string;
+}
+
+export interface SchemaTable {
+  id: string;
+  name: string;
+  description: string;
+  fields: SchemaField[];
+  displayOrder: number;
+}
+
+export interface SchemaField {
+  id: string;
+  name: string;
+  description: string;
+  type: 'string' | 'number' | 'boolean' | 'date' | 'enum';
+  required: boolean;
+  enumValues?: string[];
+  displayOrder: number;
+}
+
+export interface SchemaSuggestion {
+  id: string;
+  description: string;
+  type: 'add' | 'modify' | 'remove';
+  impact: string;
+}
+
+export interface DocumentPipeline {
+  id: string;
+  name: string;
+  description: string;
+  documentCount: number;
+  status: 'active' | 'processing' | 'completed';
+  progressCount: number;
+  schemaId: string;
+  createdAt: string;
+  updatedAt: string;
+  organizationId: string;
+}
+
+export interface ProcessingLog {
+  id: string;
+  documentId: string;
+  pipelineId?: string;
+  action: string;
+  status: 'success' | 'warning' | 'error';
+  message: string;
+  timestamp: string;
+}
+
+export interface DocumentData {
+  id: string;
+  documentId: string;
+  tableId: string;
+  fieldId: string;
+  value: string;
+  confidence: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UploadProgress {
+  id: string;
+  fileName: string;
+  progress: number;
+  status: 'uploading' | 'processing' | 'complete' | 'error';
+  message?: string;
+}
