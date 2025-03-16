@@ -1,4 +1,3 @@
-
 import * as React from "react";
 import { Document, ProcessingLog } from "@/types";
 import { Button } from "@/components/ui/button";
@@ -8,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { ExternalLink, FileText, MessageSquare, Code, AlertTriangle } from "lucide-react";
 import { PromptDisplay } from "./PromptDisplay";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { toast } from "@/components/ui/use-toast";
+import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 
 interface DocumentDetailProps {
@@ -21,68 +20,17 @@ export function DocumentDetail({ document, onProcess, logs = [] }: DocumentDetai
   const [activeTab, setActiveTab] = React.useState("preview");
   const [isCheckingFile, setIsCheckingFile] = React.useState(false);
 
-  const checkFileExists = async (path: string): Promise<boolean> => {
-    try {
-      // Extract the userId and documentId from the path
-      const pathParts = path.split('/');
-      const userId = pathParts[pathParts.length - 3]; // Second-to-last segment
-      const documentId = pathParts[pathParts.length - 2]; // Last segment
-      
-      if (!userId || !documentId) {
-        console.error("Could not extract userId or documentId from path:", path);
-        return false;
-      }
-      
-      console.log("Checking if file exists:", `${userId}/${documentId}/original.pdf`);
-      
-      // Check if the file exists in storage
-      const { data, error } = await supabase.storage
-        .from("document_files")
-        .list(`${userId}/${documentId}`);
-      
-      if (error) {
-        console.error("Error checking file existence:", error);
-        return false;
-      }
-      
-      const fileExists = data?.some(file => file.name === 'original.pdf');
-      console.log("File exists check result:", fileExists, data);
-      return !!fileExists;
-    } catch (error) {
-      console.error("Error in checkFileExists:", error);
-      return false;
-    }
-  };
-
-  const handleViewOriginal = async (url: string) => {
+  const handleViewOriginal = async () => {
     try {
       setIsCheckingFile(true);
       
-      // Extract the base path from the URL (remove the filename)
-      const urlParts = url.split('/');
-      const userId = urlParts[urlParts.length - 3]; // Format is typically: .../userId/documentId/filename
-      const documentId = urlParts[urlParts.length - 2];
-      
-      if (!userId || !documentId) {
-        throw new Error("Could not determine file path from URL");
+      // For PDFs, link directly to the original document URL
+      if (document.original_url) {
+        // Open the URL directly - no need for complex checks
+        window.open(document.original_url, "_blank");
+      } else {
+        throw new Error("No original document URL available");
       }
-      
-      // For PDFs, always use the fixed filename 'original.pdf'
-      const finalUrl = document.type === "pdf" 
-        ? `${supabase.storage.from("document_files").getPublicUrl(`${userId}/${documentId}/original.pdf`).data.publicUrl}`
-        : url;
-      
-      console.log("Original document URL:", finalUrl);
-      
-      // Check if the file exists before opening
-      const exists = await checkFileExists(finalUrl);
-      
-      if (!exists && document.type === "pdf") {
-        console.log("PDF file doesn't exist. Showing error toast.");
-        throw new Error("The original PDF file could not be found. It may have been deleted or moved.");
-      }
-      
-      window.open(finalUrl, "_blank");
     } catch (error) {
       console.error("Error opening document:", error);
       toast({
@@ -106,11 +54,11 @@ export function DocumentDetail({ document, onProcess, logs = [] }: DocumentDetai
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => handleViewOriginal(document.original_url!)}
+                  onClick={handleViewOriginal}
                   disabled={isCheckingFile}
                 >
                   <ExternalLink className="h-4 w-4 mr-2" />
-                  {isCheckingFile ? "Checking..." : "View Original"}
+                  {isCheckingFile ? "Loading..." : "View Original"}
                 </Button>
               )}
               {document.status !== "processed" && onProcess && (
@@ -187,12 +135,27 @@ export function DocumentDetail({ document, onProcess, logs = [] }: DocumentDetai
                         src={thumbnail} 
                         alt={`Page ${index + 1}`} 
                         className="w-full h-auto object-contain"
+                        onError={(e) => {
+                          console.log(`Thumbnail failed to load: ${thumbnail}`);
+                          (e.target as HTMLImageElement).src = `/placeholder.svg`;
+                        }}
                       />
                     </div>
                   ))}
                 </div>
               ) : (
-                <p className="text-center text-muted-foreground py-8">No preview available</p>
+                <div className="text-center text-muted-foreground py-8 flex flex-col items-center">
+                  <p className="mb-4">No preview thumbnails available</p>
+                  {document.original_url && (
+                    <Button
+                      variant="outline"
+                      onClick={handleViewOriginal}
+                    >
+                      <ExternalLink className="h-4 w-4 mr-2" />
+                      View Original Document
+                    </Button>
+                  )}
+                </div>
               )}
             </CardContent>
           </Card>

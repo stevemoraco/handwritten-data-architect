@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { getProcessingLogs } from "@/services/documentService";
 import { ProcessingLog } from "@/types";
-import { toast } from "@/components/ui/use-toast";
+import { toast } from "@/hooks/use-toast";
 
 export default function Document() {
   const { documentId } = useParams<{ documentId: string }>();

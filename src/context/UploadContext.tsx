@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useState, ReactNode } from 'react';
 import { UploadProgress } from '@/types';
 import { v4 as uuidv4 } from 'uuid';
@@ -43,6 +44,10 @@ export const UploadProvider = ({ children }: UploadProviderProps) => {
         pageCount: 0
       },
     ]);
+    toast({
+      title: "Upload started",
+      description: `${fileName} is being uploaded to storage.`,
+    });
     return id;
   };
 
@@ -65,15 +70,36 @@ export const UploadProvider = ({ children }: UploadProviderProps) => {
       )
     );
 
-    // Only show toast for completion, not for errors
+    // Find the upload by ID before status change
     const upload = uploads.find((u) => u.id === id);
-    if (upload && status === 'complete' && !message) {
-      toast({
-        title: 'Upload complete',
-        description: `${upload.fileName} has been uploaded successfully.`,
-      });
+    if (!upload) return;
+
+    // Show appropriate toast messages based on status
+    switch (status) {
+      case 'complete':
+        toast({
+          title: "Upload complete",
+          description: `${upload.fileName} has been uploaded successfully.`,
+        });
+        break;
+      case 'error':
+        if (message) {
+          toast({
+            title: "Upload failed",
+            description: message,
+            variant: "destructive",
+          });
+        }
+        break;
+      case 'processing':
+        if (message) {
+          toast({
+            title: "Processing document",
+            description: message,
+          });
+        }
+        break;
     }
-    // We no longer show error toasts as they'll be displayed in the UI
   };
 
   const updatePageProgress = (id: string, pagesProcessed: number, pageCount: number) => {
@@ -90,6 +116,15 @@ export const UploadProvider = ({ children }: UploadProviderProps) => {
           : upload
       )
     );
+    
+    // If all pages are processed, show a toast
+    const upload = uploads.find((u) => u.id === id);
+    if (upload && pagesProcessed === pageCount && pageCount > 0) {
+      toast({
+        title: "Document processed",
+        description: `All ${pageCount} pages of ${upload.fileName} have been processed.`,
+      });
+    }
   };
 
   const clearUploads = () => {
