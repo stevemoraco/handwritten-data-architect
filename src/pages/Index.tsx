@@ -10,7 +10,6 @@ import { ProgressSteps } from "@/components/ui/progress-steps";
 import { Progress } from "@/components/ui/progress";
 import { FileUpload } from "@/components/ui/file-upload";
 import { useUpload } from "@/context/UploadContext";
-import { AppLayout } from "@/components/layout/AppLayout";
 
 export default function Index() {
   const { user, isLoading } = useAuth();
@@ -60,7 +59,7 @@ export default function Index() {
   const uploadProgress = totalUploads > 0 ? Math.round((completedUploads / totalUploads) * 100) : 0;
   
   return (
-    <AppLayout>
+    <>
       <section className="py-4 text-center">
         <div className="container space-y-3 max-w-3xl">
           <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight">Handwriting Digitizer</h1>
@@ -213,6 +212,6 @@ export default function Index() {
         onComplete={handleLoginComplete}
         redirectPath="/process"
       />
-    </AppLayout>
+    </>
   );
 }

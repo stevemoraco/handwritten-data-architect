@@ -16,10 +16,28 @@ export default function AuthCallback() {
           return;
         }
         
+        // Extract the access token and refresh token from the URL
+        const accessToken = hashParams.get('access_token');
+        const refreshToken = hashParams.get('refresh_token');
+        
+        if (accessToken) {
+          // Set the session in Supabase using the tokens
+          const { data, error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken || '',
+          });
+          
+          if (error) {
+            console.error('Error setting session:', error);
+          } else {
+            console.log('Session set successfully');
+          }
+        }
+        
         // Let the opener know authentication is complete
         if (window.opener) {
           window.opener.postMessage(
-            { type: 'SUPABASE_AUTH_COMPLETE' },
+            { type: 'SUPABASE_AUTH_COMPLETE', accessToken, refreshToken },
             window.location.origin
           );
         }

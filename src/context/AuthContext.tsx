@@ -136,13 +136,46 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
   // Function to handle window message events for the popup
   useEffect(() => {
-    const handleAuthMessage = (event: MessageEvent) => {
+    const handleAuthMessage = async (event: MessageEvent) => {
       // Only accept messages from the same origin for security
       if (event.origin !== window.location.origin) return;
       
       if (event.data?.type === 'SUPABASE_AUTH_COMPLETE') {
         console.log('Auth popup closed, data received:', event.data);
-        // No need to manually set user as the onAuthStateChange listener will catch the SIGNED_IN event
+        
+        // If tokens were received, set the session
+        if (event.data.accessToken) {
+          try {
+            const { data, error } = await supabase.auth.setSession({
+              access_token: event.data.accessToken,
+              refresh_token: event.data.refreshToken || '',
+            });
+            
+            if (error) {
+              console.error('Error setting session from popup data:', error);
+            } else {
+              console.log('Session set successfully from popup data');
+              
+              // Fetch and set the user data immediately rather than waiting for the auth listener
+              const { data: userData } = await supabase.auth.getUser();
+              
+              if (userData && userData.user) {
+                const currentUser: User = {
+                  id: userData.user.id,
+                  email: userData.user.email || '',
+                  name: userData.user.user_metadata?.name || userData.user.email?.split('@')[0] || 'User',
+                  createdAt: userData.user.created_at,
+                  organizationId: userData.user.user_metadata?.organization_id || '',
+                };
+                
+                setUser(currentUser);
+                console.log('User set immediately after popup auth:', currentUser.email);
+              }
+            }
+          } catch (err) {
+            console.error('Failed to process popup auth data:', err);
+          }
+        }
       }
     };
 
