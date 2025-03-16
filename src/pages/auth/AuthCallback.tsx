@@ -40,10 +40,8 @@ export default function AuthCallback() {
           );
         }
         
-        // Close the popup after a short delay to ensure the message is sent
-        setTimeout(() => {
-          window.close();
-        }, 300);
+        // Close the popup immediately after sending the message
+        window.close();
       } catch (error: any) {
         console.error('Error in auth callback:', error);
         
@@ -52,10 +50,8 @@ export default function AuthCallback() {
           window.location.origin
         );
         
-        // Close the popup after a short delay
-        setTimeout(() => {
-          window.close();
-        }, 300);
+        // Close the popup immediately
+        window.close();
       }
     };
 
