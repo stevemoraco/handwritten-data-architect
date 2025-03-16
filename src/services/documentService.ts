@@ -1,3 +1,4 @@
+
 import { v4 as uuidv4 } from "uuid";
 import { supabase } from "@/integrations/supabase/client";
 import { Document, DocumentData, ProcessingLog, UploadProgress } from "@/types";
@@ -90,10 +91,14 @@ export async function uploadDocument(
       });
     }
 
-    // Upload the file to the document_files bucket
+    // Upload the file to the document_files bucket - FIX: Use 'original.pdf' as the fixed filename
+    const uploadPath = fileType === 'pdf' 
+      ? `${userId}/${id}/original.pdf` 
+      : `${userId}/${id}/${filename}`;
+      
     const { error: uploadError } = await supabase.storage
       .from("document_files")
-      .upload(`${userId}/${id}/${filename}`, file, {
+      .upload(uploadPath, file, {
         cacheControl: "3600"
       });
 
@@ -115,10 +120,10 @@ export async function uploadDocument(
       });
     }
 
-    // Get the public URL
+    // Get the public URL - FIX: Use the same path we uploaded to
     const { data: publicUrlData } = supabase.storage
       .from("document_files")
-      .getPublicUrl(`${userId}/${id}/${filename}`);
+      .getPublicUrl(uploadPath);
 
     // Update document with URL
     const { error: updateError } = await supabase

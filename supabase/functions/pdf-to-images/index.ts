@@ -92,7 +92,7 @@ serve(async (req) => {
     
     console.log(`Document found: ${document.name}, getting PDF...`);
     
-    // Get the PDF file
+    // Get the PDF file - FIX: Use 'original.pdf' as the fixed filename instead of the original filename
     const { data: fileData, error: fileError } = await supabase
       .storage
       .from("document_files")

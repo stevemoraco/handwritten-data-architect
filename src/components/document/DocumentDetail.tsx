@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { ExternalLink, FileText, MessageSquare, Code, AlertTriangle } from "lucide-react";
 import { PromptDisplay } from "./PromptDisplay";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { toast } from "@/components/ui/use-toast";
 
 interface DocumentDetailProps {
   document: Document;
@@ -19,7 +20,25 @@ export function DocumentDetail({ document, onProcess, logs = [] }: DocumentDetai
   const [activeTab, setActiveTab] = React.useState("preview");
 
   const handleViewOriginal = (url: string) => {
-    window.open(url, "_blank");
+    try {
+      // Make sure we're viewing the original.pdf file for PDFs
+      let finalUrl = url;
+      if (document.type === "pdf" && !url.endsWith("original.pdf")) {
+        // Extract the base path without the filename
+        const urlParts = url.split('/');
+        urlParts.pop(); // Remove the last part (filename)
+        finalUrl = `${urlParts.join('/')}/original.pdf`;
+      }
+      
+      window.open(finalUrl, "_blank");
+    } catch (error) {
+      console.error("Error opening document:", error);
+      toast({
+        title: "Error",
+        description: "Could not open the original document. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   return (
