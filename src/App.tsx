@@ -1,4 +1,3 @@
-
 import { Suspense, lazy } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -7,7 +6,7 @@ import { Toaster as SonnerToaster } from "@/components/ui/sonner";
 import { AuthProvider } from "@/context/AuthContext";
 import { DocumentProvider } from "@/context/DocumentContext";
 import { UploadProvider } from "@/context/UploadContext";
-import AppLayout from "@/components/layout/AppLayout";
+import { AppLayout } from "@/components/layout/AppLayout";
 
 // Lazy-loaded pages
 const IndexPage = lazy(() => import("@/pages/Index"));
