@@ -66,47 +66,126 @@ This README provides a comprehensive guide to understanding, setting up, develop
 
 The project follows a standard React application structure, with additional directories for Supabase integration and specific components:
 
-```filetree
+```
 workspace/
-├── .cache # Vite's cache directory
-├── .git # Git repository
-├── README.md # This file
-├── eslint.config.js # ESLint configuration
-├── index.html # Main HTML file
-├── postcss.config.js # PostCSS configuration
-├── public # Static assets
-├── src # Source code
-| ├── App.css # Global CSS styles
-| ├── App.tsx # Main application component
-| ├── components # Reusable UI components
-| | ├── auth # Authentication-related components (AuthForm, LoginModal)
-| | ├── dashboard # Dashboard component
-| | ├── document # Document-related components (DocumentCard, DocumentDetail, DocumentUpload, ProcessingSteps)
-| | ├── layout # Layout component (AppLayout)
-| | ├── schema # Schema-related components (SchemaChat, SchemaDataView, SchemaDetail)
-| | └── ui # shadcn-ui components (re-exported for convenience)
-| ├── context # React Context providers (AuthContext, DocumentContext, UploadContext)
-| ├── hooks # Custom React hooks (use-mobile, use-toast)
-| ├── index.css # Global CSS styles (Tailwind directives)
-| ├── integrations # Integrations with external services
-| | └── supabase # Supabase client and type definitions
-| | ├── client.ts # Supabase client initialization
-| | └── types.ts # TypeScript types for Supabase database schema
-| ├── lib # Utility functions (utils.ts)
-| ├── main.tsx # Entry point for the React application
-| ├── pages # Page components (Contact, DocumentProcess, Features, Index, NotFound, Pricing, Privacy, Terms)
-| ├── services # Functions for interacting with external services (documentService, geminiService)
-| ├── types # TypeScript type definitions
-| | └── index.ts # Global type definitions
-| └── vite-env.d.ts # TypeScript definitions for Vite
-├── supabase # Supabase-related files
-| └── functions # Supabase Edge Functions
-| ├── pdf-to-images # Function to convert PDF to images (currently mocked)
-| | └── index.ts
-| └── process-document # Function to process documents (OCR, schema generation, data extraction - currently mocked)
-| └── index.ts
-├── tailwind.config.ts # Tailwind CSS configuration
-└── vite.config.ts # Vite configuration
+ ├── .cache
+ ├── .git
+ ├── README.md
+ ├── eslint.config.js
+ ├── index.html
+ ├── postcss.config.js
+ ├── public
+ ├── src
+ |  ├── App.css
+ |  ├── App.tsx
+ |  ├── components
+ |  |  ├── auth
+ |  |  |  ├── AuthForm.tsx
+ |  |  |  ├── LoginModal.tsx
+ |  |  ├── dashboard
+ |  |  |  ├── Dashboard.tsx
+ |  |  ├── document
+ |  |  |  ├── DocumentCard.tsx
+ |  |  |  ├── DocumentDetail.tsx
+ |  |  |  ├── DocumentUpload.tsx
+ |  |  |  ├── ProcessingSteps.tsx
+ |  |  ├── layout
+ |  |  |  ├── AppLayout.tsx
+ |  |  ├── schema
+ |  |  |  ├── SchemaChat.tsx
+ |  |  |  ├── SchemaDataView.tsx
+ |  |  |  ├── SchemaDetail.tsx
+ |  |  ├── ui
+ |  |  |  ├── accordion.tsx
+ |  |  |  ├── alert-dialog.tsx
+ |  |  |  ├── alert.tsx
+ |  |  |  ├── aspect-ratio.tsx
+ |  |  |  ├── avatar.tsx
+ |  |  |  ├── badge.tsx
+ |  |  |  ├── breadcrumb.tsx
+ |  |  |  ├── button.tsx
+ |  |  |  ├── calendar.tsx
+ |  |  |  ├── card.tsx
+ |  |  |  ├── carousel.tsx
+ |  |  |  ├── chart.tsx
+ |  |  |  ├── checkbox.tsx
+ |  |  |  ├── collapsible.tsx
+ |  |  |  ├── command.tsx
+ |  |  |  ├── context-menu.tsx
+ |  |  |  ├── dialog.tsx
+ |  |  |  ├── drawer.tsx
+ |  |  |  ├── dropdown-menu.tsx
+ |  |  |  ├── empty.tsx
+ |  |  |  ├── file-upload.tsx
+ |  |  |  ├── form.tsx
+ |  |  |  ├── hover-card.tsx
+ |  |  |  ├── input-otp.tsx
+ |  |  |  ├── input.tsx
+ |  |  |  ├── label.tsx
+ |  |  |  ├── menubar.tsx
+ |  |  |  ├── navigation-menu.tsx
+ |  |  |  ├── pagination.tsx
+ |  |  |  ├── popover.tsx
+ |  |  |  ├── progress-steps.tsx
+ |  |  |  ├── progress.tsx
+ |  |  |  ├── radio-group.tsx
+ |  |  |  ├── resizable.tsx
+ |  |  |  ├── scroll-area.tsx
+ |  |  |  ├── select.tsx
+ |  |  |  ├── separator.tsx
+ |  |  |  ├── sheet.tsx
+ |  |  |  ├── sidebar.tsx
+ |  |  |  ├── skeleton.tsx
+ |  |  |  ├── slider.tsx
+ |  |  |  ├── sonner.tsx
+ |  |  |  ├── switch.tsx
+ |  |  |  ├── table.tsx
+ |  |  |  ├── tabs.tsx
+ |  |  |  ├── textarea.tsx
+ |  |  |  ├── toast.tsx
+ |  |  |  ├── toaster.tsx
+ |  |  |  ├── toggle-group.tsx
+ |  |  |  ├── toggle.tsx
+ |  |  |  ├── tooltip.tsx
+ |  |  |  ├── use-toast.ts
+ |  ├── context
+ |  |  ├── AuthContext.tsx
+ |  |  ├── DocumentContext.tsx
+ |  |  ├── UploadContext.tsx
+ |  ├── hooks
+ |  |  ├── use-mobile.tsx
+ |  |  ├── use-toast.ts
+ |  ├── index.css
+ |  ├── integrations
+ |  |  ├── supabase
+ |  |  |  ├── client.ts
+ |  |  |  ├── types.ts
+ |  ├── lib
+ |  |  ├── utils.ts
+ |  ├── main.tsx
+ |  ├── pages
+ |  |  ├── Contact.tsx
+ |  |  ├── DocumentProcess.tsx
+ |  |  ├── Features.tsx
+ |  |  ├── Index.tsx
+ |  |  ├── NotFound.tsx
+ |  |  ├── Pricing.tsx
+ |  |  ├── Privacy.tsx
+ |  |  ├── Terms.tsx
+ |  ├── services
+ |  |  ├── documentService.ts
+ |  |  ├── geminiService.ts
+ |  ├── types
+ |  |  ├── index.ts
+ |  ├── vite-env.d.ts
+ ├── supabase
+ |  ├── functions
+ |  |  ├── pdf-to-images
+ |  |  |  ├── index.ts
+ |  |  ├── process-document
+ |  |  |  ├── index.ts
+ ├── tailwind.config.ts
+ └── vite.config.ts
 ```
 
 ## Setup and Installation
