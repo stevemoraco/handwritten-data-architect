@@ -1,3 +1,4 @@
+
 import { createContext, useContext, useState, ReactNode, useEffect } from "react";
 import { Document, DocumentSchema, ProcessingLog } from "@/types";
 import { toast } from "@/components/ui/use-toast";
@@ -61,7 +62,7 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         createdAt: doc.created_at,
         updatedAt: doc.updated_at,
         userId: doc.user_id,
-        organizationId: doc.pipeline_id,
+        organizationId: doc.pipeline_id, // Use pipeline_id instead of organization_id
         pipelineId: doc.pipeline_id,
         processing_progress: doc.processing_progress,
         error: doc.processing_error
