@@ -32,7 +32,7 @@ export function BatchDocumentsSelector({
   customActions,
   renderExtraActions
 }: BatchDocumentsSelectorProps) {
-  const { documents, isLoading, error } = useDocuments();
+  const { documents, isLoading } = useDocuments();
   const [selectedIds, setSelectedIds] = React.useState<string[]>(externalSelectedIds || []);
   const [isControlledComponent] = React.useState(!!externalSelectedIds);
 
@@ -164,12 +164,6 @@ export function BatchDocumentsSelector({
               </div>
             ))}
           </div>
-        ) : error ? (
-          <div className="text-center py-8">
-            <AlertTriangle className="h-8 w-8 text-amber-500 mx-auto mb-2" />
-            <p className="text-muted-foreground">Failed to load documents</p>
-            <p className="text-xs text-muted-foreground mt-1">{error}</p>
-          </div>
         ) : documents.length === 0 ? (
           <div className="text-center py-8">
             <FileIcon className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
@@ -244,9 +238,9 @@ export function BatchDocumentsSelector({
                     <span className="h-1 w-1 rounded-full bg-muted-foreground/50"></span>
                     <span>{document.createdAt ? formatDistanceToNow(new Date(document.createdAt), { addSuffix: true }) : 'Unknown date'}</span>
                   </div>
-                  {document.status === 'failed' && document.processingError && (
+                  {document.status === 'failed' && document.processing_error && (
                     <div className="mt-1 text-xs text-destructive">
-                      Error: {document.processingError}
+                      Error: {document.processing_error}
                     </div>
                   )}
                 </div>
