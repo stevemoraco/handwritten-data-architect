@@ -5,7 +5,6 @@ import { Loader2 } from 'lucide-react';
 
 export default function AuthCallback() {
   useEffect(() => {
-    // Handle the OAuth callback
     const handleAuthCallback = async () => {
       try {
         // Process the hash parameters from the URL
@@ -44,7 +43,7 @@ export default function AuthCallback() {
         // Close the popup after a short delay to ensure the message is sent
         setTimeout(() => {
           window.close();
-        }, 100);
+        }, 300);
       } catch (error: any) {
         console.error('Error in auth callback:', error);
         
@@ -56,7 +55,7 @@ export default function AuthCallback() {
         // Close the popup after a short delay
         setTimeout(() => {
           window.close();
-        }, 100);
+        }, 300);
       }
     };
 

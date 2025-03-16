@@ -104,12 +104,13 @@ export function AuthForm({ onComplete, redirectPath = "/process", initialView = 
     
     try {
       await signInWithGoogle();
-      // Navigation will be handled by the useEffect when user state is updated
+      // The auth state listener will handle navigation when successful
     } catch (error) {
       console.error("Google sign in error:", error);
-    } finally {
       setIsSubmitting(false);
     }
+    // Note: We don't set isSubmitting to false in the finally block because
+    // we want to keep the button disabled until the auth process completes
   };
 
   if (user) {
