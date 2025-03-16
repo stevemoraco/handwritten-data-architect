@@ -1,6 +1,7 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { User } from '@/types';
+import { toast } from '@/components/ui/use-toast';
 
 interface AuthContextType {
   user: User | null;
@@ -31,13 +32,29 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
   useEffect(() => {
-    // Check for existing session
+    // Check for existing session or create a default one for demo
     const checkSession = async () => {
       try {
         // This would be replaced with an actual API call
         const storedUser = localStorage.getItem('user');
         if (storedUser) {
           setUser(JSON.parse(storedUser));
+        } else {
+          // For demo purposes, create a default logged in user
+          const defaultUser: User = {
+            id: '1',
+            email: 'demo@example.com',
+            name: 'Demo User',
+            createdAt: new Date().toISOString(),
+            organizationId: '1',
+          };
+          localStorage.setItem('user', JSON.stringify(defaultUser));
+          setUser(defaultUser);
+          
+          toast({
+            title: "Logged in as Demo User",
+            description: "For demo purposes, you've been automatically logged in.",
+          });
         }
       } catch (error) {
         console.error('Failed to restore session', error);

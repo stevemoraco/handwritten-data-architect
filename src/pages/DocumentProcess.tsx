@@ -8,7 +8,7 @@ import { SchemaChat } from "@/components/schema/SchemaChat";
 import { AIProcessingStep, DocumentSchema } from "@/types";
 import { useDocuments } from "@/context/DocumentContext";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ArrowLeft, FileText, Layers, MessageSquare } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
@@ -51,12 +51,27 @@ export default function DocumentProcess() {
   const [activeTab, setActiveTab] = React.useState("upload");
   const [generatedSchema, setGeneratedSchema] = React.useState<DocumentSchema | null>(null);
   const [isProcessingComplete, setIsProcessingComplete] = React.useState(false);
+  const [processStats, setProcessStats] = React.useState({
+    documentCount: 0,
+    processedDocuments: 0,
+    schemaDetails: {
+      tables: 0,
+      fields: 0
+    }
+  });
 
   const handleDocumentsUploaded = (documentIds: string[]) => {
     setUploadedDocumentIds(documentIds);
     
     // Update step status
     updateStepStatus("Document Upload", "completed");
+    
+    // Update process stats
+    setProcessStats(prev => ({
+      ...prev,
+      documentCount: documentIds.length,
+      processedDocuments: documentIds.length
+    }));
     
     // Auto-navigate to the next step
     setActiveTab("process");
@@ -88,6 +103,15 @@ export default function DocumentProcess() {
           
           const progress = ((i + 1) / uploadedDocumentIds.length) * 100;
           updateStepStatus("Document Transcription", "in_progress", progress);
+          
+          // Update processed documents count
+          setProcessStats(prev => ({
+            ...prev,
+            processedDocuments: i + 1
+          }));
+          
+          // Simulate processing delay
+          await new Promise(resolve => setTimeout(resolve, 1000));
         }
       }
       
@@ -99,9 +123,50 @@ export default function DocumentProcess() {
       const docsToProcess = documents.filter(doc => uploadedDocumentIds.includes(doc.id));
       const prompt = buildSchemaGenerationPrompt(docsToProcess);
       
-      // Simulate schema generation
+      // Reset processed documents for schema generation phase
+      setProcessStats(prev => ({
+        ...prev,
+        processedDocuments: 0
+      }));
+      
+      // Simulate schema generation with progress updates
+      for (let i = 0; i < docsToProcess.length; i++) {
+        // Simulate processing each document
+        await new Promise(resolve => setTimeout(resolve, 800));
+        
+        // Update processed documents count
+        setProcessStats(prev => ({
+          ...prev,
+          processedDocuments: i + 1,
+          schemaDetails: {
+            tables: Math.min(5, Math.floor((i + 1) / 2) + 1), // Simulate discovering tables
+            fields: Math.min(25, (i + 1) * 5) // Simulate discovering fields
+          }
+        }));
+        
+        const progress = ((i + 1) / docsToProcess.length) * 100;
+        updateStepStatus("Schema Generation", "in_progress", progress);
+      }
+      
+      // Simulate final schema generation
       const schema = await generateSchema(uploadedDocumentIds);
       setGeneratedSchema(schema);
+      
+      // Update final schema details based on the actual generated schema
+      if (schema && schema.structure) {
+        const totalFields = schema.structure.reduce(
+          (sum, table) => sum + (table.fields?.length || 0), 
+          0
+        );
+        
+        setProcessStats(prev => ({
+          ...prev,
+          schemaDetails: {
+            tables: schema.structure.length,
+            fields: totalFields
+          }
+        }));
+      }
       
       updateStepStatus("Schema Generation", "completed");
       updateStepStatus("Schema Refinement", "in_progress");
@@ -162,6 +227,9 @@ export default function DocumentProcess() {
             onStartProcessing={startProcessing}
             onViewResults={viewResults}
             isProcessingComplete={isProcessingComplete}
+            documentCount={processStats.documentCount}
+            processedDocuments={processStats.processedDocuments}
+            schemaDetails={processStats.schemaDetails}
           />
         </div>
         
