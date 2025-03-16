@@ -31,11 +31,14 @@ export default function Pipelines() {
       // Short timeout to ensure we show loading state
       await new Promise(resolve => setTimeout(resolve, 100));
       
-      // Use a more generic query approach since document_pipelines might not be in the types
+      // Use a type assertion with the generic query to safely handle the document_pipelines table
       const { data, error } = await supabase
         .from('document_pipelines')
         .select('*')
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false }) as { 
+          data: any[] | null; 
+          error: Error | null 
+        };
         
       if (error) {
         console.error('Error fetching pipelines:', error);

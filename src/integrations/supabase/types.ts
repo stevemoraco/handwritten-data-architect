@@ -88,6 +88,45 @@ export type Database = {
           },
         ]
       }
+      document_pipelines: {
+        Row: {
+          created_at: string
+          description: string | null
+          document_count: number | null
+          id: string
+          name: string
+          organization_id: string | null
+          progress_count: number | null
+          schema_id: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          document_count?: number | null
+          id?: string
+          name: string
+          organization_id?: string | null
+          progress_count?: number | null
+          schema_id?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          document_count?: number | null
+          id?: string
+          name?: string
+          organization_id?: string | null
+          progress_count?: number | null
+          schema_id?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       document_prompts: {
         Row: {
           created_at: string | null
