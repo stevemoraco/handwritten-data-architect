@@ -1,5 +1,5 @@
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Progress } from '@/components/ui/progress';
 import { Button } from '@/components/ui/button';
@@ -59,6 +59,13 @@ export function FileUpload({
     setFiles((currentFiles) => currentFiles.filter((file) => file !== fileToRemove));
   };
 
+  // Helper function to get formatted file size
+  const getFormattedSize = (bytes: number) => {
+    if (bytes < 1024) return bytes + ' bytes';
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / 1048576).toFixed(1) + ' MB';
+  };
+
   return (
     <div className={cn('space-y-4', className)}>
       <div
@@ -110,7 +117,9 @@ export function FileUpload({
               <div className="flex items-center space-x-3">
                 <FileIcon className="h-6 w-6 text-primary/70" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{upload.fileName}</p>
+                  <div className="flex justify-between items-center">
+                    <p className="text-sm font-medium truncate">{upload.fileName}</p>
+                  </div>
                   
                   {/* Different progress display for different stages */}
                   <div className="mt-1">

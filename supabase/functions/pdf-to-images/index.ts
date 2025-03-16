@@ -6,19 +6,21 @@ import { convert } from "https://esm.sh/pdf-img-convert@1.2.1";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
-serve(async (req) => {
-  // CORS headers
-  const headers = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    "Content-Type": "application/json",
-  };
+// CORS headers for browser requests
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, x-client-info, apikey",
+};
 
-  // Handle OPTIONS request for CORS
+serve(async (req) => {
+  // Handle CORS preflight requests
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers, status: 204 });
+    return new Response(null, { headers: corsHeaders, status: 204 });
   }
+
+  // Set CORS headers for all responses
+  const headers = { ...corsHeaders, "Content-Type": "application/json" };
 
   try {
     // Parse request body
@@ -52,7 +54,7 @@ serve(async (req) => {
       .from("documents")
       .update({
         status: "processing",
-        processing_progress: 10,
+        processing_progress: 5,
         processing_error: null
       })
       .eq("id", documentId);
@@ -98,73 +100,85 @@ serve(async (req) => {
     // Update progress
     await supabase
       .from("documents")
-      .update({ processing_progress: 20 })
+      .update({ processing_progress: 10 })
       .eq("id", documentId);
     
     // Convert the PDF to images using pdf-img-convert
     console.log("Converting PDF to images...");
-    const pages = await convert(await fileData.arrayBuffer(), {
-      scale: 1.5,     // Scale factor for image quality
-      width: 1000,     // Max width
-      height: 1400,    // Max height
-      format: "jpg",  // jpg format
-      quality: 90,    // Image quality
-    });
     
-    console.log(`Converted ${pages.length} pages`);
+    // First, get the total number of pages
+    const pdfArrayBuffer = await fileData.arrayBuffer();
+    const pageCount = (await convert(pdfArrayBuffer, { scale: 0.1, page: 1 })).length;
     
     // Update document with page count immediately
     await supabase
       .from("documents")
       .update({ 
-        processing_progress: 40,
-        page_count: pages.length
+        page_count: pageCount
       })
       .eq("id", documentId);
+      
+    console.log(`PDF has ${pageCount} pages`);
     
     // Process each page one at a time
     const thumbnails = [];
     
-    for (let i = 0; i < pages.length; i++) {
+    for (let i = 0; i < pageCount; i++) {
       const pageNumber = i + 1;
-      const jpgData = pages[i];
       
-      if (!jpgData) {
-        console.warn(`No data for page ${pageNumber}`);
-        continue;
-      }
+      // Log the page we're processing
+      console.log(`Converting page ${pageNumber} of ${pageCount}`);
       
-      console.log(`Processing page ${pageNumber}/${pages.length}`);
+      // Update document with current page
+      await supabase
+        .from("documents")
+        .update({ 
+          processing_progress: 10 + Math.floor((i / pageCount) * 80),
+          processing_error: null
+        })
+        .eq("id", documentId);
       
-      // Update processing progress to show which page we're on
+      // Update processing log for this page
       await supabase
         .from("processing_logs")
         .insert({
           document_id: documentId,
           action: "Page Processing",
           status: "success",
-          message: `Processing page ${pageNumber} of ${pages.length}`
+          message: `Converting page ${pageNumber} of ${pageCount}`
         });
       
-      await supabase
-        .from("documents")
-        .update({ 
-          processing_progress: 40 + Math.floor((i / pages.length) * 50),
-          processing_error: null
-        })
-        .eq("id", documentId);
-      
-      // Convert base64 string to a file
-      const base64Data = jpgData.toString("base64");
-      const byteCharacters = atob(base64Data);
-      const byteNumbers = new Array(byteCharacters.length);
-      for (let i = 0; i < byteCharacters.length; i++) {
-        byteNumbers[i] = byteCharacters.charCodeAt(i);
-      }
-      const byteArray = new Uint8Array(byteNumbers);
-      const blob = new Blob([byteArray], { type: "image/jpeg" });
+      // Convert this specific page
+      const pageOptions = {
+        scale: 1.5,      // Scale factor for image quality
+        width: 1000,     // Max width
+        height: 1400,    // Max height 
+        format: "jpg",   // jpg format
+        quality: 90,     // Image quality
+        page: pageNumber // Process only this page
+      };
       
       try {
+        // Convert just this page
+        const pageData = await convert(pdfArrayBuffer, pageOptions);
+        
+        if (!pageData || pageData.length === 0) {
+          console.warn(`No data for page ${pageNumber}`);
+          continue;
+        }
+        
+        const jpgData = pageData[0]; // We only requested one page
+        
+        // Convert base64 string to a file
+        const base64Data = jpgData.toString("base64");
+        const byteCharacters = atob(base64Data);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let j = 0; j < byteCharacters.length; j++) {
+          byteNumbers[j] = byteCharacters.charCodeAt(j);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: "image/jpeg" });
+        
         // Upload the page image to storage
         const filePath = `${userId}/${documentId}/page_${pageNumber}.jpg`;
         const { data: uploadData, error: uploadError } = await supabase
@@ -210,6 +224,14 @@ serve(async (req) => {
           if (pageError) {
             console.error(`Error saving page ${pageNumber} record:`, pageError);
           }
+          
+          // Report success for each processed page
+          await supabase.from("processing_logs").insert({
+            document_id: documentId,
+            action: "Page Processed",
+            status: "success",
+            message: `Completed page ${pageNumber} of ${pageCount}`
+          });
         }
       } catch (pageError) {
         console.error(`Error processing page ${pageNumber}:`, pageError);
@@ -220,17 +242,9 @@ serve(async (req) => {
           message: `Error on page ${pageNumber}: ${pageError.message || 'Unknown error'}`
         });
       }
-      
-      // Report progress for each processed page
-      await supabase.from("processing_logs").insert({
-        document_id: documentId,
-        action: "Page Processed",
-        status: "success",
-        message: `Completed page ${pageNumber} of ${pages.length}`
-      });
     }
     
-    console.log(`Uploaded ${thumbnails.length} page images`);
+    console.log(`Successfully processed ${thumbnails.length} of ${pageCount} pages`);
     
     // Update document status to processed
     await supabase
@@ -238,7 +252,7 @@ serve(async (req) => {
       .update({
         status: "processed",
         processing_progress: 100,
-        page_count: pages.length
+        page_count: pageCount
       })
       .eq("id", documentId);
     
@@ -247,13 +261,13 @@ serve(async (req) => {
       document_id: documentId,
       action: "PDF Conversion Complete",
       status: "success",
-      message: `Successfully converted ${pages.length} pages to JPG images`
+      message: `Successfully converted ${pageCount} pages to JPG images`
     });
     
     return new Response(
       JSON.stringify({
         success: true,
-        pageCount: pages.length,
+        pageCount: pageCount,
         thumbnails: thumbnails,
       }),
       { headers, status: 200 }
@@ -268,9 +282,6 @@ serve(async (req) => {
       stack: error.stack || "No stack trace",
       name: error.name,
       code: error.code,
-      statusCode: error.statusCode,
-      details: error.details,
-      fullError: JSON.stringify(error, Object.getOwnPropertyNames(error))
     };
     
     console.error("Detailed error:", errorDetails);

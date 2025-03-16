@@ -1,24 +1,25 @@
 
-import * as React from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
-import { PlusCircle, FileText, Clock, CheckCircle } from "lucide-react";
-import { useAuth } from "@/context/AuthContext";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { PlusIcon, FileTextIcon, ArrowRightIcon, CopyIcon, Trash2Icon, FileIcon } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import { toast } from "@/components/ui/use-toast";
 import { DocumentPipeline } from "@/types";
+import { useToast } from "@/components/ui/use-toast";
+import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { useAuth } from "@/context/AuthContext";
 
 export default function Pipelines() {
+  const [pipelines, setPipelines] = useState<DocumentPipeline[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const navigate = useNavigate();
+  const { toast } = useToast();
   const { user } = useAuth();
-  const [isLoading, setIsLoading] = React.useState(true);
-  const [pipelines, setPipelines] = React.useState<DocumentPipeline[]>([]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (user) {
       fetchPipelines();
     }
@@ -27,145 +28,202 @@ export default function Pipelines() {
   const fetchPipelines = async () => {
     try {
       setIsLoading(true);
-      
-      // Short timeout to ensure we show loading state
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
-      // Use a type assertion with the generic query to safely handle the document_pipelines table
+      // Using type assertion to handle the document_pipelines table
       const { data, error } = await supabase
-        .from('document_pipelines')
+        .from('document_pipelines' as any)
         .select('*')
-        .order('created_at', { ascending: false }) as { 
-          data: any[] | null; 
-          error: Error | null 
-        };
-        
+        .order('created_at', { ascending: false });
+
       if (error) {
-        console.error('Error fetching pipelines:', error);
-        throw error;
+        throw new Error(error.message);
       }
 
-      // Transform the database records to match the DocumentPipeline type
-      const pipelinesList: DocumentPipeline[] = data ? data.map((pipeline: any) => ({
-        id: pipeline.id,
-        name: pipeline.name,
-        description: pipeline.description || "",
-        documentCount: pipeline.document_count || 0,
-        status: pipeline.status as 'active' | 'processing' | 'completed',
-        progressCount: pipeline.progress_count || 0,
-        schemaId: pipeline.schema_id,
-        createdAt: pipeline.created_at,
-        updatedAt: pipeline.updated_at,
-        organizationId: pipeline.organization_id || ""
-      })) : [];
-      
-      setPipelines(pipelinesList);
+      setPipelines(data || []);
     } catch (error) {
       console.error('Error fetching pipelines:', error);
       toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to fetch pipelines",
-        variant: "destructive",
+        title: 'Error',
+        description: 'Failed to load pipelines. Please try again.',
+        variant: 'destructive',
       });
     } finally {
       setIsLoading(false);
     }
   };
 
+  const handleCreatePipeline = () => {
+    // Redirect to the process page
+    navigate('/process');
+  };
+
+  const handleOpenPipeline = (id: string) => {
+    navigate(`/pipelines/${id}`);
+  };
+
+  const handleDuplicatePipeline = async (id: string) => {
+    try {
+      const pipelineToDuplicate = pipelines.find(p => p.id === id);
+      if (!pipelineToDuplicate) return;
+
+      const { data, error } = await supabase
+        .from('document_pipelines' as any)
+        .insert({
+          name: `${pipelineToDuplicate.name} (Copy)`,
+          description: pipelineToDuplicate.description,
+          schema_id: pipelineToDuplicate.schemaId,
+          organization_id: user?.organizationId,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      toast({
+        title: 'Pipeline duplicated',
+        description: 'Pipeline has been duplicated successfully.',
+      });
+
+      await fetchPipelines();
+    } catch (error) {
+      console.error('Error duplicating pipeline:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to duplicate pipeline. Please try again.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleDeletePipeline = async (id: string) => {
+    try {
+      const { error } = await supabase
+        .from('document_pipelines' as any)
+        .delete()
+        .eq('id', id);
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      toast({
+        title: 'Pipeline deleted',
+        description: 'Pipeline has been deleted successfully.',
+      });
+
+      setPipelines(pipelines.filter(p => p.id !== id));
+    } catch (error) {
+      console.error('Error deleting pipeline:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to delete pipeline. Please try again.',
+        variant: 'destructive',
+      });
+    }
+  };
+
   return (
     <div className="container py-10">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Pipelines</h1>
-        <Button onClick={() => navigate('/pipeline/new')} className="gap-2">
-          <PlusCircle className="h-4 w-4" /> New Pipeline
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h1 className="text-3xl font-bold">Document Pipelines</h1>
+          <p className="text-muted-foreground mt-1">
+            Create and manage document processing pipelines
+          </p>
+        </div>
+        <Button onClick={handleCreatePipeline} className="gap-2">
+          <PlusIcon className="h-4 w-4" /> New Pipeline
         </Button>
       </div>
-      
-      <Separator className="my-6" />
-      
-      <div className="text-muted-foreground mb-8">
-        <p>Pipelines allow you to standardize document processing workflows with predefined schemas and extraction rules.</p>
-      </div>
-      
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {isLoading ? (
-          // Loading skeletons
-          Array.from({ length: 3 }).map((_, index) => (
-            <Card key={index} className="overflow-hidden">
-              <div className="p-6">
-                <Skeleton className="h-5 w-1/2 mb-2" />
-                <Skeleton className="h-4 w-3/4 mb-4" />
-                <div className="flex justify-between mb-4">
-                  <Skeleton className="h-4 w-1/3" />
-                  <Skeleton className="h-4 w-1/3" />
-                </div>
-                <Skeleton className="h-4 w-full" />
-                <Skeleton className="h-4 w-2/3 mt-2" />
-                <div className="flex justify-between mt-4">
-                  <Skeleton className="h-9 w-20" />
-                  <Skeleton className="h-9 w-20" />
-                </div>
-              </div>
+          Array.from({ length: 3 }).map((_, i) => (
+            <Card key={i} className="animate-pulse">
+              <CardHeader className="bg-muted/20 h-28"></CardHeader>
+              <CardContent className="py-4">
+                <div className="h-4 bg-muted rounded w-3/4 mb-2"></div>
+                <div className="h-3 bg-muted rounded w-1/2"></div>
+              </CardContent>
+              <CardFooter className="bg-muted/10 h-14"></CardFooter>
             </Card>
           ))
         ) : pipelines.length > 0 ? (
-          pipelines.map(pipeline => (
+          pipelines.map((pipeline) => (
             <Card key={pipeline.id} className="overflow-hidden">
               <CardHeader className="pb-3">
-                <CardTitle className="text-xl flex justify-between items-center">
-                  {pipeline.name}
-                  <Badge variant={
-                    pipeline.status === 'completed' ? 'secondary' : 
-                    pipeline.status === 'processing' ? 'secondary' : 
-                    'default'
-                  }>
+                <div className="flex justify-between items-start">
+                  <CardTitle className="truncate">{pipeline.name}</CardTitle>
+                  <Badge 
+                    variant={
+                      pipeline.status === 'completed' ? 'default' : 
+                      pipeline.status === 'processing' ? 'secondary' : 
+                      'outline'
+                    }
+                  >
                     {pipeline.status}
                   </Badge>
-                </CardTitle>
+                </div>
+                <CardDescription className="line-clamp-2">
+                  {pipeline.description || 'No description provided'}
+                </CardDescription>
               </CardHeader>
-              <CardContent>
-                <p className="text-muted-foreground mb-4">{pipeline.description}</p>
-                <div className="flex items-center justify-between text-sm mb-2">
+              <CardContent className="pb-3">
+                <div className="flex items-center gap-4 mb-3">
                   <div className="flex items-center">
-                    <FileText className="h-4 w-4 mr-1 text-muted-foreground" />
-                    <span>{pipeline.documentCount} documents</span>
-                  </div>
-                  <div className="flex items-center">
-                    <Clock className="h-4 w-4 mr-1 text-muted-foreground" />
-                    <span>{new Date(pipeline.createdAt).toLocaleDateString()}</span>
+                    <FileIcon className="h-4 w-4 mr-1 text-muted-foreground" />
+                    <span className="text-sm">{pipeline.documentCount || 0} documents</span>
                   </div>
                 </div>
+                
                 {pipeline.status === 'processing' && (
-                  <div className="w-full bg-secondary h-2 rounded-full mt-2">
-                    <div 
-                      className="bg-primary h-2 rounded-full" 
-                      style={{ 
-                        width: `${pipeline.documentCount > 0 
-                          ? Math.min(100, Math.round((pipeline.progressCount / pipeline.documentCount) * 100)) 
-                          : 0}%` 
-                      }}
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span>Processing</span>
+                      <span>{pipeline.progressCount || 0} of {pipeline.documentCount || 0}</span>
+                    </div>
+                    <Progress 
+                      value={pipeline.documentCount ? (pipeline.progressCount / pipeline.documentCount) * 100 : 0} 
+                      className="h-2" 
                     />
                   </div>
                 )}
               </CardContent>
-              <CardFooter className="pt-0 flex justify-between">
+              <Separator />
+              <CardFooter className="flex justify-between py-3">
                 <Button 
                   variant="outline" 
-                  onClick={() => navigate(`/pipeline/${pipeline.id}/schema`)}
+                  size="sm" 
+                  className="flex-1 mr-2"
+                  onClick={() => handleDuplicatePipeline(pipeline.id)}
                 >
-                  View Schema
+                  <CopyIcon className="h-4 w-4 mr-1" />
+                  Duplicate
                 </Button>
-                <Button onClick={() => navigate(`/pipeline/${pipeline.id}`)}>
-                  Open Pipeline
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="flex-1 ml-2"
+                  onClick={() => handleOpenPipeline(pipeline.id)}
+                >
+                  Open <ArrowRightIcon className="h-4 w-4 ml-1" />
                 </Button>
               </CardFooter>
             </Card>
           ))
         ) : (
-          <div className="col-span-full text-center p-12 border rounded-lg">
-            <h3 className="text-lg font-medium mb-2">No pipelines found</h3>
-            <p className="text-muted-foreground mb-4">Create your first pipeline to get started</p>
-            <Button onClick={() => navigate('/pipeline/new')}>Create Pipeline</Button>
+          <div className="col-span-full flex flex-col items-center justify-center text-center py-10">
+            <div className="bg-muted/20 rounded-full p-4 mb-4">
+              <FileTextIcon className="h-8 w-8 text-muted-foreground" />
+            </div>
+            <h3 className="text-lg font-medium mb-2">No pipelines yet</h3>
+            <p className="text-muted-foreground mb-4 max-w-md">
+              Create your first document processing pipeline to start extracting structured data from your documents.
+            </p>
+            <Button onClick={handleCreatePipeline} className="gap-2">
+              <PlusIcon className="h-4 w-4" /> Create Pipeline
+            </Button>
           </div>
         )}
       </div>
