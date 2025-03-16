@@ -29,6 +29,8 @@ interface DocumentCardProps {
   onProcess?: () => void;
   onDelete?: () => void;
   className?: string;
+  isSelected?: boolean; 
+  onToggleSelect?: () => void;
 }
 
 export function DocumentCard({
@@ -37,15 +39,25 @@ export function DocumentCard({
   onProcess,
   onDelete,
   className,
+  isSelected,
+  onToggleSelect
 }: DocumentCardProps) {
-  const { convertPdfToImages, processDocumentText } = useDocuments();
+  const { convertPdfToImages, processDocumentText, removeDocument } = useDocuments();
   const [isConverting, setIsConverting] = React.useState(false);
   const [isProcessingText, setIsProcessingText] = React.useState(false);
   const [progress, setProgress] = React.useState(document.processing_progress || 0);
+  const [conversionError, setConversionError] = React.useState<string | null>(document.error || null);
 
   React.useEffect(() => {
     setProgress(document.processing_progress || 0);
-  }, [document.processing_progress]);
+    setConversionError(document.error || null);
+    
+    // If document status changes from processing to another state, reset our local states
+    if (document.status !== "processing") {
+      setIsConverting(false);
+      setIsProcessingText(false);
+    }
+  }, [document.processing_progress, document.status, document.error]);
 
   const getStatusColor = (status: Document["status"]) => {
     switch (status) {
@@ -73,8 +85,13 @@ export function DocumentCard({
     }
   };
 
-  const handleConvert = async () => {
+  const handleConvert = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
     setIsConverting(true);
+    setConversionError(null);
+    
     try {
       await convertPdfToImages(document.id);
       toast({
@@ -82,17 +99,19 @@ export function DocumentCard({
         description: "PDF is being converted to images. This may take a moment.",
       });
     } catch (error) {
+      setConversionError(error instanceof Error ? error.message : "An error occurred");
       toast({
         title: "Conversion failed",
         description: error instanceof Error ? error.message : "An error occurred",
         variant: "destructive",
       });
-    } finally {
-      setIsConverting(false);
     }
   };
 
-  const handleProcessText = async () => {
+  const handleProcessText = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
     setIsProcessingText(true);
     try {
       await processDocumentText(document.id);
@@ -111,7 +130,10 @@ export function DocumentCard({
     }
   };
 
-  const openOriginalDocument = () => {
+  const openOriginalDocument = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
     if (document.url) {
       window.open(document.url, '_blank');
     } else {
@@ -123,8 +145,62 @@ export function DocumentCard({
     }
   };
 
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    try {
+      if (onDelete) {
+        onDelete();
+      } else {
+        await removeDocument(document.id);
+        toast({
+          title: "Document deleted",
+          description: "The document has been removed successfully",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Deletion failed",
+        description: error instanceof Error ? error.message : "An error occurred",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleViewClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (onView) onView();
+  };
+
+  const handleProcessClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (onProcess) onProcess();
+  };
+
+  const handleCardClick = () => {
+    if (onToggleSelect) {
+      onToggleSelect();
+    }
+  };
+
   return (
-    <Card className={cn("overflow-hidden transition-all hover:shadow-md", className)}>
+    <Card 
+      className={cn(
+        "overflow-hidden transition-all hover:shadow-md cursor-pointer relative", 
+        isSelected && "ring-2 ring-primary",
+        className
+      )}
+      onClick={handleCardClick}
+    >
+      {isSelected && (
+        <div className="absolute right-2 top-2 h-4 w-4 rounded-full bg-primary z-10"></div>
+      )}
+      
       <CardHeader className="p-4">
         <div className="flex items-start justify-between">
           <div className="space-y-1">
@@ -142,7 +218,7 @@ export function DocumentCard({
         </div>
       </CardHeader>
       
-      {document.status === "processing" && (
+      {(document.status === "processing" || isConverting) && (
         <CardContent className="px-4 pb-0 pt-0">
           <div className="space-y-1">
             <div className="flex justify-between text-xs text-muted-foreground">
@@ -150,6 +226,15 @@ export function DocumentCard({
               <span>{progress}%</span>
             </div>
             <Progress value={progress} className="h-1" />
+          </div>
+        </CardContent>
+      )}
+      
+      {conversionError && (
+        <CardContent className="px-4 pb-0 pt-0 bg-destructive/10 rounded mx-2">
+          <div className="text-xs text-destructive p-2">
+            <p className="font-medium">Conversion failed</p>
+            <p className="break-words">{conversionError}</p>
           </div>
         </CardContent>
       )}
@@ -189,7 +274,7 @@ export function DocumentCard({
         </CardContent>
       )}
       
-      {document.error && (
+      {document.error && !conversionError && (
         <CardContent className="px-4 pb-0 pt-0">
           <div className="text-xs text-destructive bg-destructive/10 p-2 rounded border border-destructive/20">
             <p className="font-medium">Error:</p>
@@ -206,7 +291,7 @@ export function DocumentCard({
           size="sm"
           variant="outline"
           className="h-8 text-xs"
-          onClick={onView}
+          onClick={handleViewClick}
         >
           <Eye className="h-3 w-3 mr-1" /> View
         </Button>
@@ -217,9 +302,9 @@ export function DocumentCard({
           variant={document.status === "failed" ? "destructive" : "outline"}
           className="h-8 text-xs"
           onClick={handleConvert}
-          disabled={isConverting || document.status === "processing"}
+          disabled={document.status === "processing"}
         >
-          {isConverting ? (
+          {isConverting || document.status === "processing" ? (
             <>
               <RotateCw className="h-3 w-3 mr-1 animate-spin" />
               Converting...
@@ -274,7 +359,7 @@ export function DocumentCard({
             size="sm"
             variant="outline"
             className="h-8 text-xs"
-            onClick={onProcess}
+            onClick={handleProcessClick}
           >
             <FileImage className="h-3 w-3 mr-1" />
             Process
@@ -299,7 +384,7 @@ export function DocumentCard({
           size="sm"
           variant="outline"
           className="h-8 text-xs ml-auto text-destructive hover:text-destructive hover:bg-destructive/10 hover:border-destructive/20"
-          onClick={onDelete}
+          onClick={handleDelete}
           disabled={document.status === "processing"}
         >
           <Trash2 className="h-3 w-3 mr-1" />

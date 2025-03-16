@@ -13,7 +13,8 @@ interface DocumentContextProps {
   setDocuments: (documents: Document[]) => void;
   addDocument: (document: Document) => void;
   updateDocument: (id: string, updates: Partial<Document>) => void;
-  removeDocument: (id: string) => void;
+  removeDocument: (id: string) => Promise<void>;
+  removeBatchDocuments: (ids: string[]) => Promise<void>;
   convertPdfToImages: (documentId: string) => Promise<void>;
   fetchUserDocuments: () => Promise<void>;
   processDocumentText: (documentId: string) => Promise<void>;
@@ -154,8 +155,92 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
     );
   };
 
-  const removeDocument = (id: string) => {
-    setDocuments((prev) => prev.filter((doc) => doc.id !== id));
+  const removeDocument = async (id: string) => {
+    try {
+      // Delete from Supabase
+      const { error } = await supabase
+        .from("documents")
+        .delete()
+        .eq("id", id);
+      
+      if (error) {
+        throw new Error(`Failed to delete document: ${error.message}`);
+      }
+      
+      // Delete document pages
+      await supabase
+        .from("document_pages")
+        .delete()
+        .eq("document_id", id);
+      
+      // Delete document files from storage
+      // Note: In a production app, you might want to use a background job for this
+      if (user) {
+        await supabase.storage
+          .from("document_files")
+          .remove([`${user.id}/${id}/`]);
+      }
+      
+      // Update state
+      setDocuments((prev) => prev.filter((doc) => doc.id !== id));
+      
+    } catch (error) {
+      console.error("Error deleting document:", error);
+      toast({
+        title: "Delete Failed",
+        description: error instanceof Error ? error.message : "Failed to delete document",
+        variant: "destructive",
+      });
+      throw error;
+    }
+  };
+  
+  const removeBatchDocuments = async (ids: string[]) => {
+    if (!ids.length) return;
+    
+    try {
+      // Delete from Supabase
+      const { error } = await supabase
+        .from("documents")
+        .delete()
+        .in("id", ids);
+      
+      if (error) {
+        throw new Error(`Failed to delete documents: ${error.message}`);
+      }
+      
+      // Delete document pages
+      await supabase
+        .from("document_pages")
+        .delete()
+        .in("document_id", ids);
+      
+      // Delete document files from storage
+      if (user) {
+        for (const id of ids) {
+          await supabase.storage
+            .from("document_files")
+            .remove([`${user.id}/${id}/`]);
+        }
+      }
+      
+      // Update state
+      setDocuments((prev) => prev.filter((doc) => !ids.includes(doc.id)));
+      
+      toast({
+        title: "Documents Deleted",
+        description: `Successfully deleted ${ids.length} document(s)`,
+      });
+      
+    } catch (error) {
+      console.error("Error batch deleting documents:", error);
+      toast({
+        title: "Delete Failed",
+        description: error instanceof Error ? error.message : "Failed to delete documents",
+        variant: "destructive",
+      });
+      throw error;
+    }
   };
 
   const convertPdfToImages = async (documentId: string) => {
@@ -169,17 +254,20 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      setIsLoading(true);
-      
       // First update the document status to processing
-      updateDocument(documentId, { status: "processing" });
+      updateDocument(documentId, { 
+        status: "processing",
+        processing_progress: 0,
+        error: null 
+      });
       
       // Update the status in the database
       await supabase
         .from("documents")
         .update({
           status: "processing",
-          processing_progress: 0
+          processing_progress: 0,
+          processing_error: null
         })
         .eq("id", documentId);
       
@@ -191,10 +279,35 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         message: `Starting PDF to images conversion process for document ${documentId}`
       });
       
+      // Set up a subscription to track progress
+      const conversionSubscription = supabase
+        .channel(`document-conversion-${documentId}`)
+        .on('postgres_changes', { 
+          event: 'UPDATE', 
+          schema: 'public', 
+          table: 'documents',
+          filter: `id=eq.${documentId}` 
+        }, (payload) => {
+          console.log("Document update received:", payload);
+          
+          // Update the local state with the progress
+          updateDocument(documentId, { 
+            status: payload.new.status,
+            processing_progress: payload.new.processing_progress,
+            error: payload.new.processing_error
+          });
+        })
+        .subscribe();
+      
       // Call the PDF to images function
       const { data, error } = await supabase.functions.invoke('pdf-to-images', {
         body: { documentId, userId: user.id }
       });
+      
+      // Unsubscribe from the channel after a delay
+      setTimeout(() => {
+        conversionSubscription.unsubscribe();
+      }, 60000); // Keep subscription for 1 minute
       
       if (error) {
         console.error("Error invoking pdf-to-images function:", error);
@@ -206,20 +319,11 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         throw new Error(data?.error || "Unknown error in PDF conversion");
       }
       
-      // Update the document with the results
-      updateDocument(documentId, { 
-        status: "processed",
-        pageCount: data.pageCount,
-        thumbnails: data.thumbnails
-      });
+      // Refresh the documents list after a short delay
+      setTimeout(() => {
+        fetchUserDocuments();
+      }, 2000);
       
-      toast({
-        title: "Conversion complete",
-        description: `Successfully converted ${data.pageCount} pages to images`,
-      });
-      
-      // Refresh the documents list
-      await fetchUserDocuments();
     } catch (error) {
       console.error("Error in PDF conversion:", error);
       
@@ -246,13 +350,7 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         message: error instanceof Error ? error.message : "Unknown error"
       });
       
-      toast({
-        title: "Conversion failed",
-        description: error instanceof Error ? error.message : "An unknown error occurred",
-        variant: "destructive",
-      });
-    } finally {
-      setIsLoading(false);
+      throw error;
     }
   };
 
@@ -374,6 +472,7 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         addDocument,
         updateDocument,
         removeDocument,
+        removeBatchDocuments,
         convertPdfToImages,
         fetchUserDocuments,
         processDocumentText
