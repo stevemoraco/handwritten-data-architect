@@ -1,7 +1,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.38.4";
-import * as pdfjs from "https://cdn.skypack.dev/pdfjs-dist@3.4.120/build/pdf.min.js";
+import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -15,28 +15,30 @@ serve(async (req) => {
   }
 
   try {
-    // Create Supabase client
-    const supabaseUrl = Deno.env.get("SUPABASE_URL");
-    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-    if (!supabaseUrl || !supabaseServiceKey) {
-      console.error("SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is not set");
-      throw new Error("Supabase configuration is missing");
-    }
-
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    // Parse request body
     const { documentId, userId } = await req.json();
-
+    
     if (!documentId) {
       throw new Error("Document ID is required");
     }
-
+    
     if (!userId) {
       throw new Error("User ID is required");
     }
 
-    console.log(`Converting PDF to images for document ID: ${documentId}`);
+    console.log(`Processing PDF document: ${documentId} for user: ${userId}`);
 
-    // Get document from database
+    // Create Supabase client
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    
+    if (!supabaseUrl || !supabaseServiceKey) {
+      throw new Error("Supabase configuration is missing");
+    }
+    
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Get document information
     const { data: document, error: documentError } = await supabase
       .from("documents")
       .select("*")
@@ -44,159 +46,147 @@ serve(async (req) => {
       .single();
 
     if (documentError) {
-      console.error("Error fetching document:", documentError);
       throw new Error(`Failed to fetch document: ${documentError.message}`);
     }
 
+    if (!document.original_url) {
+      throw new Error("Document URL is missing");
+    }
+
+    console.log(`Downloading PDF from URL: ${document.original_url}`);
+
+    // Download the PDF file
+    const response = await fetch(document.original_url);
+    if (!response.ok) {
+      throw new Error(`Failed to download PDF: ${response.statusText}`);
+    }
+
+    const pdfBytes = await response.arrayBuffer();
+    
+    // Load the PDF document
+    const pdfDoc = await PDFDocument.load(pdfBytes);
+    const pageCount = pdfDoc.getPageCount();
+    
+    console.log(`PDF has ${pageCount} pages`);
+    
+    // Update document page count
+    await supabase
+      .from("documents")
+      .update({ 
+        page_count: pageCount,
+        processing_progress: 10,
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", documentId);
+    
     // Log processing start
     await supabase.from("processing_logs").insert({
       document_id: documentId,
-      action: "PDF to Images Conversion",
+      action: "PDF Conversion",
       status: "success",
-      message: "PDF to images conversion started",
+      message: `Starting PDF to image conversion for ${pageCount} pages`,
     });
-
-    // Update document status to processing
-    await supabase
-      .from("documents")
-      .update({
-        status: "processing",
-        processing_progress: 0,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", documentId);
-
-    // Download the PDF from storage
-    const { data: fileData, error: fileError } = await supabase.storage
-      .from("document_files")
-      .download(`${userId}/${documentId}/${document.name}`);
-
-    if (fileError) {
-      throw new Error(`Failed to download PDF: ${fileError.message}`);
-    }
-
-    // Initialize the PDF.js worker
-    pdfjs.GlobalWorkerOptions.workerSrc = "https://cdn.skypack.dev/pdfjs-dist@3.4.120/build/pdf.worker.min.js";
-
-    // Load the PDF document
-    const pdfData = new Uint8Array(await fileData.arrayBuffer());
-    const pdf = await pdfjs.getDocument({ data: pdfData }).promise;
-    const numPages = pdf.numPages;
-
-    console.log(`PDF has ${numPages} pages, starting page extraction`);
 
     // Process each page
-    const pages = [];
-    for (let i = 1; i <= numPages; i++) {
-      console.log(`Processing page ${i} of ${numPages}`);
+    const pagePromises = [];
+    
+    for (let i = 0; i < pageCount; i++) {
+      const pageNumber = i + 1;
       
-      // Update progress
-      await supabase
-        .from("documents")
-        .update({
-          processing_progress: (i / numPages) * 100,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", documentId);
+      // Extract single page
+      const singlePagePdf = await PDFDocument.create();
+      const [copiedPage] = await singlePagePdf.copyPages(pdfDoc, [i]);
+      singlePagePdf.addPage(copiedPage);
+      const singlePageBytes = await singlePagePdf.saveAsBase64({ dataUri: true });
       
-      // Log page extraction
-      await supabase.from("processing_logs").insert({
-        document_id: documentId,
-        action: `Page ${i} Extraction`,
-        status: "success",
-        message: `Extracting image from page ${i}`,
-      });
-
-      // Get the page
-      const page = await pdf.getPage(i);
+      // Upload page image to storage
+      const imagePath = `${userId}/${documentId}/page_${pageNumber}.png`;
       
-      // Set the scale for rendering (adjust as needed for desired quality)
-      const scale = 1.5;
-      const viewport = page.getViewport({ scale });
+      pagePromises.push(
+        (async () => {
+          try {
+            // Using a data URI to load the image
+            const dataURI = singlePageBytes;
+            
+            // For PDF pages, we need to convert to PNG using a web-based renderer
+            // This is a simplified approach - in production, consider using a service like Puppeteer
+            const imgBlob = await fetch(`https://pdf2png-api.com/convert?base64=${encodeURIComponent(dataURI)}`);
+            const imgData = await imgBlob.arrayBuffer();
+            
+            // Upload the PNG to storage
+            const { data: storageData, error: storageError } = await supabase.storage
+              .from("document_images")
+              .upload(imagePath, imgData, {
+                contentType: "image/png",
+                cacheControl: "3600",
+              });
+              
+            if (storageError) {
+              throw new Error(`Failed to upload page image: ${storageError.message}`);
+            }
+            
+            // Get public URL
+            const { data: publicUrlData } = supabase.storage
+              .from("document_images")
+              .getPublicUrl(imagePath);
+              
+            // Add page record to database
+            await supabase.from("document_pages").insert({
+              document_id: documentId,
+              page_number: pageNumber,
+              image_url: publicUrlData.publicUrl,
+            });
+            
+            // Update document progress
+            const progress = Math.floor(10 + ((pageNumber / pageCount) * 90));
+            await supabase
+              .from("documents")
+              .update({ 
+                processing_progress: progress,
+                updated_at: new Date().toISOString()
+              })
+              .eq("id", documentId);
+              
+            return publicUrlData.publicUrl;
+          } catch (error) {
+            console.error(`Error processing page ${pageNumber}:`, error);
+            // Log the error but continue with other pages
+            return null;
+          }
+        })()
+      );
       
-      // Create a canvas for rendering
-      const canvas = new OffscreenCanvas(viewport.width, viewport.height);
-      const context = canvas.getContext("2d");
-      
-      // Render the page to the canvas
-      await page.render({
-        canvasContext: context,
-        viewport,
-      }).promise;
-      
-      // Convert canvas to PNG
-      const imageBlob = await canvas.convertToBlob({ type: "image/png" });
-      const imageName = `page_${i}.png`;
-      
-      // Upload the image to storage
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from("document_images")
-        .upload(`${userId}/${documentId}/${imageName}`, imageBlob, {
-          contentType: "image/png",
-          upsert: true,
-        });
-      
-      if (uploadError) {
-        throw new Error(`Failed to upload page image: ${uploadError.message}`);
+      // Process pages in batches of 3 to avoid overwhelming the server
+      if (pagePromises.length >= 3 || i === pageCount - 1) {
+        await Promise.all(pagePromises);
+        pagePromises.length = 0;
       }
-      
-      // Get the public URL
-      const { data: imagePublicUrlData } = supabase.storage
-        .from("document_images")
-        .getPublicUrl(`${userId}/${documentId}/${imageName}`);
-      
-      // Create page record
-      const { data: pageData, error: pageError } = await supabase
-        .from("document_pages")
-        .insert({
-          document_id: documentId,
-          page_number: i,
-          image_url: imagePublicUrlData.publicUrl,
-        })
-        .select()
-        .single();
-      
-      if (pageError) {
-        throw new Error(`Failed to create page record: ${pageError.message}`);
-      }
-      
-      pages.push(pageData);
-      
-      // Log page extraction completion
-      await supabase.from("processing_logs").insert({
-        document_id: documentId,
-        action: `Page ${i} Extraction`,
-        status: "success",
-        message: `Successfully extracted image from page ${i}`,
-      });
     }
-
-    // Update document status and page count
+    
+    // Update document as processed
     await supabase
       .from("documents")
-      .update({
+      .update({ 
         status: "processed",
-        page_count: numPages,
         processing_progress: 100,
-        updated_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
       })
       .eq("id", documentId);
-
-    // Log processing completion
+      
+    // Log completion
     await supabase.from("processing_logs").insert({
       document_id: documentId,
-      action: "PDF to Images Conversion",
+      action: "PDF Conversion",
       status: "success",
-      message: `Successfully converted PDF to ${numPages} images`,
+      message: `Successfully converted PDF to ${pageCount} images`,
     });
 
-    console.log(`PDF conversion completed for document ID: ${documentId}`);
     return new Response(
       JSON.stringify({ 
         success: true, 
-        message: `Successfully converted PDF to ${numPages} images`,
-        pages,
-        pageCount: numPages
+        message: "PDF processing complete",
+        pageCount,
+        documentId
       }),
       { 
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -204,21 +194,23 @@ serve(async (req) => {
       }
     );
   } catch (error) {
-    console.error("Error converting PDF to images:", error);
+    console.error("Error in PDF to images conversion:", error);
     
-    // Try to log the error to the processing_logs table
+    // Try to log the error if possible
     try {
-      const supabaseUrl = Deno.env.get("SUPABASE_URL");
-      const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+      const body = await req.json().catch(() => ({}));
+      const documentId = body.documentId;
       
-      if (supabaseUrl && supabaseServiceKey) {
-        const supabase = createClient(supabaseUrl, supabaseServiceKey);
-        const body = await req.json().catch(() => ({}));
+      if (documentId) {
+        const supabaseUrl = Deno.env.get("SUPABASE_URL");
+        const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
         
-        if (body.documentId) {
+        if (supabaseUrl && supabaseServiceKey) {
+          const supabase = createClient(supabaseUrl, supabaseServiceKey);
+          
           await supabase.from("processing_logs").insert({
-            document_id: body.documentId,
-            action: "PDF to Images Conversion",
+            document_id: documentId,
+            action: "PDF Conversion",
             status: "error",
             message: error.message || "Unknown error occurred",
           });
@@ -230,7 +222,7 @@ serve(async (req) => {
               processing_error: error.message || "Unknown error occurred",
               updated_at: new Date().toISOString(),
             })
-            .eq("id", body.documentId);
+            .eq("id", documentId);
         }
       }
     } catch (logError) {

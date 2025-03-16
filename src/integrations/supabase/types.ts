@@ -9,6 +9,47 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      document_data: {
+        Row: {
+          confidence: number | null
+          created_at: string
+          document_id: string
+          field_id: string
+          id: string
+          table_id: string
+          updated_at: string
+          value: string | null
+        }
+        Insert: {
+          confidence?: number | null
+          created_at?: string
+          document_id: string
+          field_id: string
+          id?: string
+          table_id: string
+          updated_at?: string
+          value?: string | null
+        }
+        Update: {
+          confidence?: number | null
+          created_at?: string
+          document_id?: string
+          field_id?: string
+          id?: string
+          table_id?: string
+          updated_at?: string
+          value?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "document_data_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       document_pages: {
         Row: {
           created_at: string
@@ -47,6 +88,42 @@ export type Database = {
           },
         ]
       }
+      document_schemas: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          name: string
+          organization_id: string | null
+          rationale: string | null
+          structure: Json
+          suggestions: Json | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          name: string
+          organization_id?: string | null
+          rationale?: string | null
+          structure: Json
+          suggestions?: Json | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          name?: string
+          organization_id?: string | null
+          rationale?: string | null
+          structure?: Json
+          suggestions?: Json | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       documents: {
         Row: {
           created_at: string
@@ -54,6 +131,7 @@ export type Database = {
           name: string
           original_url: string | null
           page_count: number | null
+          pipeline_id: string | null
           processing_error: string | null
           processing_progress: number | null
           size: number | null
@@ -69,6 +147,7 @@ export type Database = {
           name: string
           original_url?: string | null
           page_count?: number | null
+          pipeline_id?: string | null
           processing_error?: string | null
           processing_progress?: number | null
           size?: number | null
@@ -84,6 +163,7 @@ export type Database = {
           name?: string
           original_url?: string | null
           page_count?: number | null
+          pipeline_id?: string | null
           processing_error?: string | null
           processing_progress?: number | null
           size?: number | null
