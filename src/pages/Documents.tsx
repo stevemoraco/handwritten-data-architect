@@ -22,6 +22,13 @@ export default function Documents() {
     }
   }, []);
 
+  const handleProcessSelected = () => {
+    if (selectedDocumentIds.length === 0) return;
+    
+    // Navigate to the process page with selected document IDs in the state to prevent URL length limitations
+    navigate('/process', { state: { documentIds: selectedDocumentIds } });
+  };
+
   return (
     <div className="container py-10">
       <div className="flex items-center justify-between">
@@ -31,7 +38,7 @@ export default function Documents() {
             <PlusIcon className="h-4 w-4" /> Upload Documents
           </Button>
           <Button 
-            onClick={() => navigate('/process')} 
+            onClick={handleProcessSelected} 
             variant="outline" 
             className="gap-2"
             disabled={selectedDocumentIds.length === 0}

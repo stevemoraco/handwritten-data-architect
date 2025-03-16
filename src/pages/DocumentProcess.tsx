@@ -1,5 +1,6 @@
+
 import * as React from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { DocumentUpload } from "@/components/document/DocumentUpload";
 import { ProcessingSteps } from "@/components/document/ProcessingSteps";
 import { SchemaDetail } from "@/components/schema/SchemaDetail";
@@ -42,15 +43,20 @@ const generateRealisticPages = (doc: any) => {
 
 export default function DocumentProcess() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { toast } = useToast();
   const { user, isLoading } = useAuth();
-  const [uploadedDocumentIds, setUploadedDocumentIds] = React.useState<string[]>([]);
+  
+  // Get selected document IDs from location state if available
+  const preselectedDocumentIds = location.state?.documentIds || [];
+  
+  const [uploadedDocumentIds, setUploadedDocumentIds] = React.useState<string[]>(preselectedDocumentIds);
   const [steps, setSteps] = React.useState<AIProcessingStep[]>([
     {
       id: uuidv4(),
       name: "Document Upload",
       description: "Upload PDF documents for processing",
-      status: "waiting",
+      status: preselectedDocumentIds.length > 0 ? "completed" : "waiting",
       timestamp: new Date().toISOString(),
     },
     {
@@ -75,11 +81,15 @@ export default function DocumentProcess() {
       timestamp: new Date().toISOString(),
     },
   ]);
-  const [activeTab, setActiveTab] = React.useState("upload");
+  
+  // Set the initial active tab (process if documents are preselected)
+  const initialTab = preselectedDocumentIds.length > 0 ? "process" : "upload";
+  const [activeTab, setActiveTab] = React.useState(initialTab);
+  
   const [generatedSchema, setGeneratedSchema] = React.useState<DocumentSchema | null>(null);
   const [isProcessingComplete, setIsProcessingComplete] = React.useState(false);
   const [processStats, setProcessStats] = React.useState({
-    documentCount: 0,
+    documentCount: preselectedDocumentIds.length,
     processedDocuments: 0,
     schemaDetails: {
       tables: 0,
@@ -90,7 +100,11 @@ export default function DocumentProcess() {
   const [authCheckComplete, setAuthCheckComplete] = React.useState(false);
   const [extractedData, setExtractedData] = React.useState<any | null>(null);
   const [processingError, setProcessingError] = React.useState<string | null>(null);
+  
+  // Flag to prevent multiple automatic processing triggers
+  const hasStartedProcessingRef = React.useRef(false);
 
+  // Check if user is authenticated
   React.useEffect(() => {
     let timer: NodeJS.Timeout;
     
@@ -124,6 +138,73 @@ export default function DocumentProcess() {
     };
   }, [user, isLoading, navigate, toast]);
 
+  // Automatically load document details if documents are preselected
+  React.useEffect(() => {
+    const loadPreselectedDocuments = async () => {
+      if (preselectedDocumentIds.length > 0 && user && authCheckComplete) {
+        try {
+          const { data: documents, error } = await supabase
+            .from("documents")
+            .select("*")
+            .in("id", preselectedDocumentIds);
+          
+          if (error) {
+            throw new Error(`Failed to fetch document metadata: ${error.message}`);
+          }
+          
+          if (documents.length === 0) {
+            toast({
+              title: "No documents found",
+              description: "The selected documents could not be found",
+              variant: "destructive"
+            });
+            return;
+          }
+          
+          setProcessStats(prev => ({
+            ...prev,
+            documentCount: documents.length,
+            processedDocuments: 0
+          }));
+          
+          const initialDocDetails = documents.map(doc => ({
+            id: doc.id,
+            name: doc.name,
+            pageCount: doc.page_count || 0,
+            processedPages: 0,
+            status: doc.status || "waiting",
+            pages: generateRealisticPages(doc),
+            thumbnail: undefined,
+            error: doc.processing_error
+          }));
+          
+          setDocumentDetails(initialDocDetails);
+          console.log("Preselected documents loaded:", documents);
+          
+          // Start processing automatically only once
+          if (!hasStartedProcessingRef.current) {
+            hasStartedProcessingRef.current = true;
+            // Use a short delay to ensure the UI renders first
+            setTimeout(() => {
+              startProcessing();
+            }, 500);
+          }
+        } catch (error) {
+          console.error("Error loading preselected documents:", error);
+          setProcessingError(error instanceof Error ? error.message : "Unknown error");
+          toast({
+            title: "Error",
+            description: `Failed to load selected documents: ${error instanceof Error ? error.message : "Unknown error"}`,
+            variant: "destructive"
+          });
+        }
+      }
+    };
+    
+    loadPreselectedDocuments();
+  }, [preselectedDocumentIds, user, authCheckComplete]);
+
+  // Document update subscription
   React.useEffect(() => {
     if (!uploadedDocumentIds.length) return;
 
@@ -668,6 +749,60 @@ export default function DocumentProcess() {
               <DocumentUpload 
                 onDocumentsUploaded={handleDocumentsUploaded}
               />
+            </TabsContent>
+            
+            <TabsContent value="process" className="mt-4">
+              <Card>
+                <CardContent className="pt-6">
+                  {documentDetails.length > 0 ? (
+                    <div>
+                      <h3 className="text-lg font-medium mb-4">Processing {documentDetails.length} document(s)</h3>
+                      <div className="space-y-4">
+                        {documentDetails.map(doc => (
+                          <div key={doc.id} className="border rounded p-3">
+                            <div className="flex justify-between items-center mb-2">
+                              <p className="font-medium">{doc.name}</p>
+                              <Badge variant={doc.status === 'completed' ? 'default' : 
+                                     doc.status === 'processing' ? 'secondary' : 
+                                     doc.status === 'failed' ? 'destructive' : 'outline'}>
+                                {doc.status}
+                              </Badge>
+                            </div>
+                            
+                            {doc.status === 'processing' && (
+                              <div className="space-y-1">
+                                <div className="flex justify-between text-xs">
+                                  <span>Processing pages...</span>
+                                  <span>{doc.processedPages} of {doc.pageCount}</span>
+                                </div>
+                                <Progress value={doc.pageCount > 0 ? (doc.processedPages / doc.pageCount) * 100 : 0} className="h-2" />
+                              </div>
+                            )}
+                            
+                            {doc.status === 'failed' && doc.error && (
+                              <p className="text-xs text-destructive mt-1">{doc.error}</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                      
+                      <div className="mt-6 flex justify-end">
+                        <Button 
+                          onClick={startProcessing} 
+                          disabled={isProcessingComplete || steps.some(step => step.status === 'in_progress')}
+                        >
+                          {steps.some(step => step.status === 'in_progress') ? 'Processing...' : 'Start Processing'}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <p>No documents selected for processing.</p>
+                      <p>Please select documents from the Upload tab.</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
             </TabsContent>
             
             <TabsContent value="schema" className="mt-4">
