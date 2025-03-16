@@ -1,10 +1,8 @@
-
 import * as React from "react";
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "@/components/ui/use-toast";
 import { useNavigate } from "react-router-dom";
@@ -12,10 +10,11 @@ import { useNavigate } from "react-router-dom";
 interface AuthFormProps {
   onComplete?: () => void;
   redirectPath?: string;
+  initialView?: "login" | "register" | "sign_in" | "sign_up";
 }
 
-export function AuthForm({ onComplete, redirectPath = "/process" }: AuthFormProps) {
-  const [activeTab, setActiveTab] = useState("login");
+export function AuthForm({ onComplete, redirectPath = "/process", initialView = "login" }: AuthFormProps) {
+  const [activeTab, setActiveTab] = useState(initialView === "sign_in" ? "login" : initialView === "sign_up" ? "register" : initialView);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
@@ -138,109 +137,70 @@ export function AuthForm({ onComplete, redirectPath = "/process" }: AuthFormProp
 
   return (
     <div className="w-full max-w-md mx-auto">
-      <Tabs defaultValue="login" value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="login">Login</TabsTrigger>
-          <TabsTrigger value="register">Register</TabsTrigger>
-        </TabsList>
+      <form onSubmit={activeTab === "login" ? handleLogin : handleRegister} className="space-y-4">
+        {activeTab === "register" && (
+          <div className="space-y-2">
+            <Label htmlFor="name">Name</Label>
+            <Input
+              id="name"
+              type="text"
+              placeholder="Enter your name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+              disabled={isSubmitting}
+              className="glass-input"
+            />
+          </div>
+        )}
         
-        <TabsContent value="login" className="mt-6">
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="Enter your email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                disabled={isSubmitting}
-                className="glass-input"
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="password">Password</Label>
-                <Button 
-                  variant="link" 
-                  className="p-0 h-auto text-xs" 
-                  type="button"
-                  onClick={handleForgotPassword}
-                  disabled={isSubmitting}
-                >
-                  Forgot Password?
-                </Button>
-              </div>
-              <Input
-                id="password"
-                type="password"
-                placeholder="Enter your password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                disabled={isSubmitting}
-                className="glass-input"
-              />
-            </div>
-            
-            <Button type="submit" className="w-full" disabled={isSubmitting}>
-              {isSubmitting ? "Logging in..." : "Login"}
-            </Button>
-          </form>
-        </TabsContent>
+        <div className="space-y-2">
+          <Label htmlFor="email">Email</Label>
+          <Input
+            id="email"
+            type="email"
+            placeholder="Enter your email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            disabled={isSubmitting}
+            className="glass-input"
+          />
+        </div>
         
-        <TabsContent value="register" className="mt-6">
-          <form onSubmit={handleRegister} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Name</Label>
-              <Input
-                id="name"
-                type="text"
-                placeholder="Enter your name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="password">Password</Label>
+            {activeTab === "login" && (
+              <Button 
+                variant="link" 
+                className="p-0 h-auto text-xs" 
+                type="button"
+                onClick={handleForgotPassword}
                 disabled={isSubmitting}
-                className="glass-input"
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="register-email">Email</Label>
-              <Input
-                id="register-email"
-                type="email"
-                placeholder="Enter your email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                disabled={isSubmitting}
-                className="glass-input"
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="register-password">Password</Label>
-              <Input
-                id="register-password"
-                type="password"
-                placeholder="Create a password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                disabled={isSubmitting}
-                className="glass-input"
-              />
-            </div>
-            
-            <Button type="submit" className="w-full" disabled={isSubmitting}>
-              {isSubmitting ? "Creating account..." : "Create account"}
-            </Button>
-          </form>
-        </TabsContent>
-      </Tabs>
+              >
+                Forgot Password?
+              </Button>
+            )}
+          </div>
+          <Input
+            id="password"
+            type="password"
+            placeholder={activeTab === "login" ? "Enter your password" : "Create a password"}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            disabled={isSubmitting}
+            className="glass-input"
+          />
+        </div>
+        
+        <Button type="submit" className="w-full" disabled={isSubmitting}>
+          {isSubmitting 
+            ? (activeTab === "login" ? "Logging in..." : "Creating account...") 
+            : (activeTab === "login" ? "Login" : "Create account")}
+        </Button>
+      </form>
     </div>
   );
 }

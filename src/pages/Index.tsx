@@ -2,7 +2,7 @@
 import * as React from "react";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
-import { FileUpload, Upload, ClipboardCheck, FileExport, ArrowRight } from "lucide-react";
+import { Upload, ClipboardCheck, ArrowRight, FileText } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { LoginModal } from "@/components/auth/LoginModal";
 import { Card, CardContent } from "@/components/ui/card";
@@ -38,7 +38,7 @@ export default function Index() {
       <header className="border-b bg-background py-4">
         <div className="container flex items-center justify-between">
           <div className="flex items-center space-x-2">
-            <FileUpload className="h-6 w-6 text-primary" />
+            <FileText className="h-6 w-6 text-primary" />
             <span className="font-bold text-xl">Handwriting Digitizer</span>
           </div>
           <nav className="flex items-center space-x-6">
@@ -159,7 +159,7 @@ export default function Index() {
             {/* Step 3 */}
             <div className="space-y-4">
               <div className="bg-primary/10 rounded-full p-4 inline-flex">
-                <FileExport className="h-6 w-6 text-primary" />
+                <FileText className="h-6 w-6 text-primary" />
               </div>
               <h3 className="text-xl font-medium">Export Data</h3>
               <p className="text-muted-foreground">
@@ -176,7 +176,7 @@ export default function Index() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
             <div className="space-y-4">
               <div className="flex items-center space-x-2">
-                <FileUpload className="h-6 w-6 text-primary" />
+                <FileText className="h-6 w-6 text-primary" />
                 <span className="font-bold text-lg">Handwriting Digitizer</span>
               </div>
               <p className="text-muted-foreground text-sm">
