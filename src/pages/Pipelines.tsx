@@ -28,9 +28,8 @@ export default function Pipelines() {
   const fetchPipelines = async () => {
     try {
       setIsLoading(true);
-      // Using type assertion to handle the document_pipelines table
       const { data, error } = await supabase
-        .from('document_pipelines' as any)
+        .from('document_pipelines')
         .select('*')
         .order('created_at', { ascending: false });
 
@@ -38,7 +37,21 @@ export default function Pipelines() {
         throw new Error(error.message);
       }
 
-      setPipelines(data || []);
+      // Transform the data to match the DocumentPipeline type
+      const transformedData = data ? data.map(item => ({
+        id: item.id,
+        name: item.name,
+        description: item.description || '',
+        documentCount: item.document_count || 0,
+        status: item.status || 'active',
+        progressCount: item.progress_count || 0,
+        schemaId: item.schema_id || '',
+        createdAt: item.created_at,
+        updatedAt: item.updated_at,
+        organizationId: item.organization_id || '',
+      })) : [];
+
+      setPipelines(transformedData);
     } catch (error) {
       console.error('Error fetching pipelines:', error);
       toast({
@@ -66,7 +79,7 @@ export default function Pipelines() {
       if (!pipelineToDuplicate) return;
 
       const { data, error } = await supabase
-        .from('document_pipelines' as any)
+        .from('document_pipelines')
         .insert({
           name: `${pipelineToDuplicate.name} (Copy)`,
           description: pipelineToDuplicate.description,
@@ -99,7 +112,7 @@ export default function Pipelines() {
   const handleDeletePipeline = async (id: string) => {
     try {
       const { error } = await supabase
-        .from('document_pipelines' as any)
+        .from('document_pipelines')
         .delete()
         .eq('id', id);
 
