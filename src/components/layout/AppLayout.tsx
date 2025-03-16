@@ -1,4 +1,3 @@
-
 import * as React from "react";
 import { ReactNode } from "react";
 import { cn } from "@/lib/utils";
@@ -168,8 +167,7 @@ export function AppLayout({ children }: AppLayoutProps) {
               </div>
               <p className="text-muted-foreground text-sm">
                 Transform handwritten documents into structured data effortlessly. 
-                Built for healthcare providers, law firms, and any organization handling 
-                handwritten information.
+                Built for any organization handling handwritten information.
               </p>
               <div className="flex space-x-3">
                 <a 
