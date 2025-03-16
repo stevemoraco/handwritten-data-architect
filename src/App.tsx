@@ -1,5 +1,6 @@
+
 import { Suspense, lazy } from "react";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Route, Routes, Outlet } from "react-router-dom";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as SonnerToaster } from "@/components/ui/sonner";
@@ -43,7 +44,7 @@ function App() {
                 }
               >
                 <Routes>
-                  <Route path="/" element={<AppLayout />}>
+                  <Route path="/" element={<AppLayout><Outlet /></AppLayout>}>
                     {/* Public routes */}
                     <Route index element={<IndexPage />} />
                     <Route path="auth" element={<AuthPage />} />
