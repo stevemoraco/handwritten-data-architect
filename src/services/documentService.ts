@@ -319,8 +319,23 @@ export async function getProcessingLogs(documentId: string): Promise<ProcessingL
       return [];
     }
 
-    // Map directly to ProcessingLog interface
-    return data || [] as ProcessingLog[];
+    // Type check and cast to ensure status is one of the allowed values
+    return (data || []).map(item => {
+      // Validate status to ensure it matches the ProcessingLog interface
+      let validStatus: "success" | "error" | "warning" = "error";
+      if (item.status === "success" || item.status === "warning") {
+        validStatus = item.status;
+      }
+      
+      return {
+        id: item.id,
+        document_id: item.document_id,
+        action: item.action,
+        status: validStatus,
+        message: item.message || "",
+        created_at: item.created_at
+      } as ProcessingLog;
+    });
   } catch (error) {
     console.error("Error in getProcessingLogs:", error);
     return [];

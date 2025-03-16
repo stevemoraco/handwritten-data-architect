@@ -1,4 +1,3 @@
-
 export interface User {
   id: string;
   email: string;
@@ -98,7 +97,7 @@ export interface ProcessingLog {
   id: string;
   document_id: string;
   action: string;
-  status: "success" | "error";
+  status: "success" | "error" | "warning";  // Added "warning" status to match what might come from API
   message?: string;
   created_at: string;
 }
