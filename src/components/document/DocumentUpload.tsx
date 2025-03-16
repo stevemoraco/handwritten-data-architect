@@ -5,12 +5,15 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/componen
 import { Button } from "@/components/ui/button";
 import { useUpload } from "@/context/UploadContext";
 import { useAuth } from "@/context/AuthContext";
+import { useDocuments } from "@/context/DocumentContext";
 import { toast } from "@/components/ui/use-toast";
-import { ArrowRight, FileText, Shield, AlertTriangle } from "lucide-react";
+import { ArrowRight, FileText, Shield, AlertTriangle, RefreshCw } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
 import { LoginModal } from "@/components/auth/LoginModal";
+import { Document } from "@/types";
+import { Separator } from "@/components/ui/separator";
 
 interface DocumentUploadProps {
   onDocumentsUploaded?: (documentIds: string[]) => void;
@@ -25,12 +28,19 @@ export function DocumentUpload({
 }: DocumentUploadProps) {
   const { isUploading, uploads, addUpload, updateUploadProgress, updateUploadStatus, updatePageProgress } = useUpload();
   const { user } = useAuth();
+  const { documents, isLoading, fetchUserDocuments, convertPdfToImages } = useDocuments();
   const navigate = useNavigate();
   const [selectedFiles, setSelectedFiles] = React.useState<File[]>([]);
   const [uploadedDocumentIds, setUploadedDocumentIds] = React.useState<string[]>([]);
   const [showLoginModal, setShowLoginModal] = React.useState(false);
   const [isProcessing, setIsProcessing] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (user) {
+      fetchUserDocuments();
+    }
+  }, [user]);
 
   const handleFilesSelected = (files: File[]) => {
     if (!user) {
@@ -61,7 +71,7 @@ export function DocumentUpload({
               .from('documents')
               .insert({
                 name: file.name,
-                type: file.type,
+                type: file.type.includes('pdf') ? 'pdf' : 'image',
                 status: 'uploading',
                 user_id: user.id,
                 size: file.size
@@ -86,7 +96,7 @@ export function DocumentUpload({
             
             console.log(`Created document record with ID: ${document.id}`);
             
-            const filePath = `${user.id}/${document.id}/${file.name}`;
+            const filePath = `${user.id}/${document.id}/${encodeURIComponent(file.name)}`;
             
             const uploadOptions = {
               cacheControl: '3600'
@@ -186,6 +196,7 @@ export function DocumentUpload({
                 });
               
               if (processingError) {
+                console.error("Processing error from edge function:", processingError);
                 throw new Error(`Document processing failed: ${processingError.message}`);
               }
               
@@ -197,6 +208,9 @@ export function DocumentUpload({
               
               updateUploadStatus(uploadId, 'complete');
               setIsProcessing(false);
+              
+              // Refresh the documents list to show the newly processed document
+              await fetchUserDocuments();
             } catch (processingError) {
               console.error('Error processing document:', processingError);
               setIsProcessing(false);
@@ -231,12 +245,24 @@ export function DocumentUpload({
         
         toast({
           title: "Files uploaded successfully",
-          description: `${successfulUploads.length} document${successfulUploads.length > 1 ? 's' : ''} uploaded and processed.`,
+          description: `${successfulUploads.length} document${successfulUploads.length > 1 ? 's' : ''} uploaded.`,
         });
+        
+        // Refresh documents list
+        await fetchUserDocuments();
       }
     } catch (error) {
       console.error('Unexpected error in file upload handler:', error);
       setError(`An unexpected error occurred: ${error.message}`);
+    }
+  };
+
+  const handleRetryProcessing = async (documentId: string) => {
+    try {
+      await convertPdfToImages(documentId);
+    } catch (error) {
+      console.error("Error retrying processing:", error);
+      setError(`Failed to process document: ${error.message}`);
     }
   };
 
@@ -246,6 +272,10 @@ export function DocumentUpload({
     } else if (uploadedDocumentIds.length > 0) {
       navigate(`/document/${uploadedDocumentIds[0]}`);
     }
+  };
+
+  const handleViewDocument = (documentId: string) => {
+    navigate(`/document/${documentId}`);
   };
 
   const handleAuthComplete = () => {
@@ -308,6 +338,81 @@ export function DocumentUpload({
           {isProcessing && (
             <div className="mt-4 text-center py-2 text-sm text-muted-foreground animate-pulse">
               Processing documents... This might take a moment.
+            </div>
+          )}
+          
+          {/* Previously uploaded documents */}
+          {user && documents.length > 0 && (
+            <div className="mt-6">
+              <Separator className="my-4" />
+              <h3 className="text-sm font-medium mb-2">Your Documents</h3>
+              <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                {documents.map((doc) => (
+                  <Card key={doc.id} className="p-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-3 flex-grow min-w-0">
+                        <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded border bg-muted">
+                          {doc.thumbnails && doc.thumbnails.length > 0 ? (
+                            <img 
+                              src={doc.thumbnails[0]} 
+                              alt={doc.name}
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <FileText className="h-full w-full p-2 text-muted-foreground" />
+                          )}
+                        </div>
+                        <div className="flex-grow min-w-0">
+                          <p className="text-sm font-medium truncate">{doc.name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {doc.pageCount ? `${doc.pageCount} pages` : 'Uploading...'}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex space-x-2">
+                        {doc.status === "failed" && (
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => handleRetryProcessing(doc.id)}
+                          >
+                            <RefreshCw className="h-3.5 w-3.5 mr-1" />
+                            Retry
+                          </Button>
+                        )}
+                        <Button 
+                          variant="secondary" 
+                          size="sm"
+                          onClick={() => handleViewDocument(doc.id)}
+                        >
+                          View
+                        </Button>
+                      </div>
+                    </div>
+                    
+                    {/* Status indicator */}
+                    {doc.status === "processing" && (
+                      <div className="mt-2">
+                        <div className="flex justify-between text-xs">
+                          <span>Processing...</span>
+                          <span>{Math.round(doc.processing_progress || 0)}%</span>
+                        </div>
+                        <div className="w-full bg-muted rounded-full h-1.5 mt-1">
+                          <div 
+                            className="bg-primary h-1.5 rounded-full transition-all duration-300" 
+                            style={{ width: `${doc.processing_progress || 0}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Error message */}
+                    {doc.status === "failed" && doc.error && (
+                      <p className="mt-2 text-xs text-red-500">{doc.error}</p>
+                    )}
+                  </Card>
+                ))}
+              </div>
             </div>
           )}
         </CardContent>

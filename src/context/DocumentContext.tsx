@@ -1,5 +1,5 @@
 
-import { createContext, useContext, useState, ReactNode } from "react";
+import { createContext, useContext, useState, ReactNode, useEffect } from "react";
 import { Document } from "@/types";
 import { toast } from "@/components/ui/use-toast";
 import { useAuth } from "@/context/AuthContext";
@@ -14,6 +14,7 @@ interface DocumentContextProps {
   updateDocument: (id: string, updates: Partial<Document>) => void;
   removeDocument: (id: string) => void;
   convertPdfToImages: (documentId: string) => Promise<void>;
+  fetchUserDocuments: () => Promise<void>;
 }
 
 const DocumentContext = createContext<DocumentContextProps | undefined>(undefined);
@@ -22,6 +23,72 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const { user } = useAuth();
+
+  useEffect(() => {
+    if (user) {
+      fetchUserDocuments();
+    }
+  }, [user]);
+
+  const fetchUserDocuments = async () => {
+    if (!user) return;
+
+    try {
+      setIsLoading(true);
+      const { data, error } = await supabase
+        .from("documents")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        throw new Error(`Failed to fetch documents: ${error.message}`);
+      }
+
+      // Transform the database records to match the Document type
+      const documentsList: Document[] = data.map((doc) => ({
+        id: doc.id,
+        name: doc.name,
+        type: doc.type as "pdf" | "image",
+        status: doc.status as "uploaded" | "processing" | "processed" | "failed",
+        url: doc.original_url || "",
+        thumbnails: [],
+        pageCount: doc.page_count || 0,
+        transcription: doc.transcription,
+        createdAt: doc.created_at,
+        updatedAt: doc.updated_at,
+        userId: doc.user_id,
+        organizationId: doc.organization_id,
+        pipelineId: doc.pipeline_id,
+        processing_progress: doc.processing_progress,
+        error: doc.processing_error
+      }));
+
+      // Fetch thumbnails for each document
+      for (const doc of documentsList) {
+        const { data: pages } = await supabase
+          .from("document_pages")
+          .select("image_url")
+          .eq("document_id", doc.id)
+          .order("page_number", { ascending: true });
+
+        if (pages && pages.length > 0) {
+          doc.thumbnails = pages.map(page => page.image_url).filter(Boolean);
+        }
+      }
+
+      setDocuments(documentsList);
+    } catch (error) {
+      console.error("Error fetching documents:", error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to fetch documents",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const addDocument = (document: Document) => {
     setDocuments((prev) => [...prev, document]);
@@ -53,6 +120,15 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
       // First update the document status to processing
       updateDocument(documentId, { status: "processing" });
       
+      // Update the status in the database
+      await supabase
+        .from("documents")
+        .update({
+          status: "processing",
+          processing_progress: 0
+        })
+        .eq("id", documentId);
+      
       // Log the start of the process
       await supabase.from("processing_logs").insert({
         document_id: documentId,
@@ -67,11 +143,13 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
       });
       
       if (error) {
+        console.error("Error invoking pdf-to-images function:", error);
         throw new Error(`Failed to convert PDF: ${error.message}`);
       }
       
-      if (!data.success) {
-        throw new Error(data.error || "Unknown error in PDF conversion");
+      if (!data || !data.success) {
+        console.error("PDF conversion returned error:", data?.error || "Unknown error");
+        throw new Error(data?.error || "Unknown error in PDF conversion");
       }
       
       // Update the document with the results
@@ -85,6 +163,9 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         title: "Conversion complete",
         description: `Successfully converted ${data.pageCount} pages to images`,
       });
+      
+      // Refresh the documents list
+      await fetchUserDocuments();
     } catch (error) {
       console.error("Error in PDF conversion:", error);
       
@@ -93,6 +174,15 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         status: "failed",
         error: error instanceof Error ? error.message : "Unknown error"
       });
+      
+      // Update the status in the database
+      await supabase
+        .from("documents")
+        .update({
+          status: "failed",
+          processing_error: error instanceof Error ? error.message : "Unknown error"
+        })
+        .eq("id", documentId);
       
       // Log the error
       await supabase.from("processing_logs").insert({
@@ -122,6 +212,7 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         updateDocument,
         removeDocument,
         convertPdfToImages,
+        fetchUserDocuments
       }}
     >
       {children}
