@@ -4,15 +4,30 @@ import { DocumentUpload } from "@/components/document/DocumentUpload";
 import { ProcessingSteps } from "@/components/document/ProcessingSteps";
 import { SchemaDetail } from "@/components/schema/SchemaDetail";
 import { SchemaChat } from "@/components/schema/SchemaChat";
-import { AIProcessingStep, DocumentSchema, SchemaSuggestion } from "@/types";
+import { 
+  AIProcessingStep, 
+  DocumentSchema, 
+  SchemaSuggestion 
+} from "@/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowLeft, FileText, Layers, MessageSquare } from "lucide-react";
+import { 
+  ArrowLeft, 
+  FileText, 
+  Layers, 
+  MessageSquare, 
+  AlertCircle 
+} from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import { supabase } from "@/integrations/supabase/client";
-import { useToast } from "@/hooks/use-toast";
+import { useToast } from "@/components/ui/use-toast";
 import { useAuth } from "@/context/AuthContext";
+import { 
+  transcribeDocument, 
+  generateSchema, 
+  extractDocumentData
+} from "@/services/documentService";
 
 const generateMockPages = (pageCount: number) => {
   return Array.from({ length: pageCount }).map((_, i) => ({
@@ -72,6 +87,8 @@ export default function DocumentProcess() {
   });
   const [documentDetails, setDocumentDetails] = React.useState<any[]>([]);
   const [authCheckComplete, setAuthCheckComplete] = React.useState(false);
+  const [extractedData, setExtractedData] = React.useState<any | null>(null);
+  const [processingError, setProcessingError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     let timer: NodeJS.Timeout;
@@ -106,6 +123,90 @@ export default function DocumentProcess() {
     };
   }, [user, isLoading, navigate, toast]);
 
+  React.useEffect(() => {
+    if (!uploadedDocumentIds.length) return;
+
+    const subscription = supabase
+      .channel('document-updates')
+      .on('postgres_changes', { 
+        event: 'UPDATE', 
+        schema: 'public', 
+        table: 'documents',
+        filter: `id=in.(${uploadedDocumentIds.join(',')})` 
+      }, (payload) => {
+        console.log("Document update received:", payload);
+        
+        setDocumentDetails(prev => 
+          prev.map(doc => 
+            doc.id === payload.new.id 
+              ? { 
+                  ...doc, 
+                  status: payload.new.status,
+                  pageCount: payload.new.page_count || doc.pageCount,
+                  processedPages: payload.new.processing_progress 
+                    ? Math.floor((payload.new.processing_progress / 100) * (payload.new.page_count || doc.pageCount))
+                    : doc.processedPages,
+                  error: payload.new.processing_error
+                } 
+              : doc
+          )
+        );
+      })
+      .subscribe();
+
+    const pagesSubscription = supabase
+      .channel('document-pages-updates')
+      .on('postgres_changes', { 
+        event: 'INSERT', 
+        schema: 'public', 
+        table: 'document_pages',
+        filter: `document_id=in.(${uploadedDocumentIds.join(',')})` 
+      }, (payload) => {
+        console.log("Document page added:", payload);
+        
+        const { document_id, page_number, image_url, text_content } = payload.new;
+        
+        setDocumentDetails(prev => 
+          prev.map(doc => {
+            if (doc.id === document_id) {
+              const existingPageIndex = doc.pages.findIndex(p => p.pageNumber === page_number);
+              
+              if (existingPageIndex >= 0) {
+                const updatedPages = [...doc.pages];
+                updatedPages[existingPageIndex] = {
+                  ...updatedPages[existingPageIndex],
+                  status: "completed",
+                  thumbnail: image_url,
+                  text: text_content
+                };
+                return { ...doc, pages: updatedPages };
+              } else {
+                return {
+                  ...doc,
+                  pages: [
+                    ...doc.pages,
+                    {
+                      pageNumber: page_number,
+                      status: "completed",
+                      thumbnail: image_url,
+                      text: text_content
+                    }
+                  ].sort((a, b) => a.pageNumber - b.pageNumber)
+                };
+              }
+            }
+            return doc;
+          })
+        );
+      })
+      .subscribe();
+    
+    return () => {
+      subscription.unsubscribe();
+      pagesSubscription.unsubscribe();
+    };
+  }, [uploadedDocumentIds]);
+
   const handleDocumentsUploaded = async (documentIds: string[]) => {
     if (!documentIds.length) return;
     
@@ -125,18 +226,18 @@ export default function DocumentProcess() {
       setProcessStats(prev => ({
         ...prev,
         documentCount: documentIds.length,
-        processedDocuments: documentIds.length
+        processedDocuments: 0
       }));
       
       const initialDocDetails = documents.map(doc => ({
         id: doc.id,
         name: doc.name,
-        pageCount: doc.page_count || 5,
+        pageCount: doc.page_count || 0,
         processedPages: 0,
-        status: "waiting" as const,
-        pages: generateMockPages(doc.page_count || 5),
+        status: doc.status || "waiting",
+        pages: generateMockPages(doc.page_count || 0),
         thumbnail: undefined,
-        error: undefined
+        error: doc.processing_error
       }));
       
       setDocumentDetails(initialDocDetails);
@@ -145,9 +246,10 @@ export default function DocumentProcess() {
       setActiveTab("process");
     } catch (error) {
       console.error("Error in document upload handling:", error);
+      setProcessingError(error instanceof Error ? error.message : "Unknown error");
       toast({
         title: "Error",
-        description: `Failed to process uploaded documents: ${error.message}`,
+        description: `Failed to process uploaded documents: ${error instanceof Error ? error.message : "Unknown error"}`,
         variant: "destructive"
       });
     }
@@ -176,6 +278,10 @@ export default function DocumentProcess() {
           : doc
       )
     );
+    
+    if (error) {
+      setProcessingError(error);
+    }
   };
 
   const updatePageStatus = (docId: string, pageNumber: number, status: "waiting" | "processing" | "completed" | "failed", updates: Partial<{ thumbnail: string, text: string, error: string }> = {}) => {
@@ -193,247 +299,10 @@ export default function DocumentProcess() {
           : doc
       )
     );
-  };
-
-  const simulateDocumentTranscription = async () => {
-    updateStepStatus("Document Transcription", "in_progress", 0);
-    setProcessStats(prev => ({ ...prev, processedDocuments: 0 }));
     
-    const totalDocs = documentDetails.length;
-    let processedDocs = 0;
-    let totalPages = 0;
-    let processedPages = 0;
-    
-    documentDetails.forEach(doc => {
-      totalPages += doc.pageCount;
-    });
-    
-    for (const doc of documentDetails) {
-      console.log(`Starting transcription of document: ${doc.name}`);
-      updateDocumentStatus(doc.id, "processing", 0);
-      
-      for (let i = 0; i < doc.pages.length; i++) {
-        const pageNumber = i + 1;
-        const page = doc.pages[i];
-        
-        updatePageStatus(doc.id, pageNumber, "processing");
-        
-        const processingTime = 2000 + Math.random() * 2000;
-        await new Promise(resolve => setTimeout(resolve, processingTime));
-        
-        const dummyThumbnail = `https://via.placeholder.com/800x1000?text=Page+${pageNumber}`;
-        const dummyText = `This is extracted text from page ${pageNumber} of document ${doc.name}. The content appears to include several paragraphs of information that have been successfully extracted using OCR technology.`;
-        
-        const shouldFail = Math.random() < 0.05;
-        
-        if (shouldFail) {
-          updatePageStatus(doc.id, pageNumber, "failed", {
-            error: "OCR processing failed for this page"
-          });
-          console.log(`Failed to process page ${pageNumber} of document ${doc.id}`);
-        } else {
-          updatePageStatus(doc.id, pageNumber, "completed", {
-            thumbnail: dummyThumbnail,
-            text: dummyText
-          });
-          console.log(`Processed page ${pageNumber} of document ${doc.id}`);
-        }
-        
-        updateDocumentStatus(doc.id, "processing", i + 1);
-        
-        processedPages++;
-        const transcriptionProgress = (processedPages / totalPages) * 100;
-        updateStepStatus("Document Transcription", "in_progress", transcriptionProgress);
-        
-        setProcessStats(prev => ({
-          ...prev,
-          processedDocuments: processedPages
-        }));
-      }
-      
-      updateDocumentStatus(doc.id, "completed", doc.pageCount);
-      processedDocs++;
-      
-      console.log(`Completed transcription of document: ${doc.name}`);
-      
-      const firstPageWithThumbnail = doc.pages.find(p => p.status === "completed" && p.thumbnail);
-      if (firstPageWithThumbnail) {
-        setDocumentDetails(prev => 
-          prev.map(d => 
-            d.id === doc.id 
-              ? { ...d, thumbnail: firstPageWithThumbnail.thumbnail } 
-              : d
-          )
-        );
-      }
+    if (updates.error) {
+      setProcessingError(updates.error);
     }
-    
-    updateStepStatus("Document Transcription", "completed");
-    console.log("Document transcription completed");
-    
-    simulateSchemaGeneration();
-  };
-
-  const simulateSchemaGeneration = async () => {
-    updateStepStatus("Schema Generation", "in_progress", 0);
-    setProcessStats(prev => ({ ...prev, processedDocuments: 0 }));
-    
-    const totalDocs = documentDetails.length;
-    let processedDocs = 0;
-    
-    setDocumentDetails(prev => 
-      prev.map(doc => ({
-        ...doc,
-        status: "waiting"
-      }))
-    );
-    
-    for (const doc of documentDetails) {
-      console.log(`Analyzing document for schema: ${doc.name}`);
-      updateDocumentStatus(doc.id, "processing");
-      
-      const processingTime = 3000 + Math.random() * 3000;
-      await new Promise(resolve => setTimeout(resolve, processingTime));
-      
-      updateDocumentStatus(doc.id, "completed");
-      processedDocs++;
-      
-      const schemaProgress = (processedDocs / totalDocs) * 100;
-      updateStepStatus("Schema Generation", "in_progress", schemaProgress);
-      
-      setProcessStats(prev => ({
-        ...prev,
-        processedDocuments: processedDocs,
-        schemaDetails: {
-          tables: Math.min(10, prev.schemaDetails.tables + 1 + Math.floor(Math.random() * 2)),
-          fields: Math.min(50, prev.schemaDetails.fields + 5 + Math.floor(Math.random() * 10))
-        }
-      }));
-      
-      console.log(`Completed schema analysis for document: ${doc.name}`);
-    }
-    
-    updateStepStatus("Schema Generation", "completed");
-    console.log("Schema generation completed");
-    
-    const mockSchema: DocumentSchema = {
-      id: uuidv4(),
-      name: `Schema for ${totalDocs} document(s)`,
-      description: "Automatically generated schema based on document content",
-      rationale: "Basic document information schema with intelligent field mapping",
-      suggestions: [
-        {
-          id: uuidv4(),
-          description: "Consider adding a 'category' field to classify documents",
-          type: "add",
-          impact: "Improves document organization and searchability"
-        },
-        {
-          id: uuidv4(),
-          description: "Date formats should be standardized across all documents",
-          type: "modify",
-          impact: "Ensures consistency in date handling across the system"
-        }
-      ],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      organizationId: user?.organizationId || '',
-      structure: [
-        {
-          id: uuidv4(),
-          name: "Document Information",
-          description: "Basic document metadata",
-          displayOrder: 1,
-          fields: [
-            {
-              id: uuidv4(),
-              name: "document_id",
-              description: "Unique document identifier",
-              type: "string",
-              required: true,
-              displayOrder: 1
-            },
-            {
-              id: uuidv4(),
-              name: "document_name",
-              description: "Document filename",
-              type: "string",
-              required: true,
-              displayOrder: 2
-            },
-            {
-              id: uuidv4(),
-              name: "upload_date",
-              description: "Date of upload",
-              type: "date",
-              required: true,
-              displayOrder: 3
-            },
-            {
-              id: uuidv4(),
-              name: "page_count",
-              description: "Number of pages",
-              type: "number",
-              required: false,
-              displayOrder: 4
-            }
-          ]
-        },
-        {
-          id: uuidv4(),
-          name: "Invoice Details",
-          description: "Invoice specific information",
-          displayOrder: 2,
-          fields: [
-            {
-              id: uuidv4(),
-              name: "invoice_number",
-              description: "Invoice reference number",
-              type: "string",
-              required: true,
-              displayOrder: 1
-            },
-            {
-              id: uuidv4(),
-              name: "issue_date",
-              description: "Date invoice was issued",
-              type: "date",
-              required: true,
-              displayOrder: 2
-            },
-            {
-              id: uuidv4(),
-              name: "due_date",
-              description: "Payment due date",
-              type: "date",
-              required: true,
-              displayOrder: 3
-            },
-            {
-              id: uuidv4(),
-              name: "total_amount",
-              description: "Total invoice amount",
-              type: "number",
-              required: true,
-              displayOrder: 4
-            },
-            {
-              id: uuidv4(),
-              name: "tax_amount",
-              description: "Tax amount",
-              type: "number",
-              required: false,
-              displayOrder: 5
-            }
-          ]
-        }
-      ]
-    };
-    
-    setGeneratedSchema(mockSchema);
-    
-    updateStepStatus("Schema Refinement", "in_progress");
-    setActiveTab("schema");
   };
 
   const startProcessing = async () => {
@@ -446,11 +315,14 @@ export default function DocumentProcess() {
       return;
     }
     
+    setProcessingError(null);
+    
     try {
-      simulateDocumentTranscription();
+      await transcribeDocuments();
     } catch (error) {
       console.error("Error in document processing:", error);
-      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+      setProcessingError(errorMessage);
       
       toast({
         title: "Processing error",
@@ -462,6 +334,192 @@ export default function DocumentProcess() {
       if (currentStep) {
         updateStepStatus(currentStep.name, "failed", undefined, errorMessage);
       }
+    }
+  };
+
+  const transcribeDocuments = async () => {
+    updateStepStatus("Document Transcription", "in_progress", 0);
+    setProcessStats(prev => ({ ...prev, processedDocuments: 0 }));
+    
+    try {
+      for (const doc of documentDetails) {
+        console.log(`Starting transcription of document: ${doc.name}`);
+        updateDocumentStatus(doc.id, "processing", 0);
+        
+        try {
+          const transcription = await transcribeDocument(doc.id);
+          
+          if (!transcription) {
+            throw new Error("Transcription failed");
+          }
+          
+          updateDocumentStatus(doc.id, "completed", doc.pageCount);
+          
+          setProcessStats(prev => ({
+            ...prev,
+            processedDocuments: prev.processedDocuments + 1
+          }));
+          
+          const progress = (processStats.processedDocuments / processStats.documentCount) * 100;
+          updateStepStatus("Document Transcription", "in_progress", progress);
+          
+        } catch (error) {
+          console.error(`Error transcribing document ${doc.id}:`, error);
+          updateDocumentStatus(doc.id, "failed", undefined, error instanceof Error ? error.message : "Transcription failed");
+          throw error;
+        }
+      }
+      
+      updateStepStatus("Document Transcription", "completed");
+      console.log("Document transcription completed");
+      
+      await generateDocumentSchema();
+      
+    } catch (error) {
+      console.error("Error in transcribeDocuments:", error);
+      updateStepStatus("Document Transcription", "failed", undefined, error instanceof Error ? error.message : "Unknown error");
+      throw error;
+    }
+  };
+
+  const generateDocumentSchema = async () => {
+    updateStepStatus("Schema Generation", "in_progress", 0);
+    
+    try {
+      console.log("Starting schema generation");
+      
+      setDocumentDetails(prev => 
+        prev.map(doc => ({
+          ...doc,
+          status: "waiting"
+        }))
+      );
+      
+      for (const doc of documentDetails) {
+        updateDocumentStatus(doc.id, "processing");
+      }
+      
+      const schemaResult = await generateSchema(uploadedDocumentIds);
+      
+      if (!schemaResult) {
+        throw new Error("Schema generation failed");
+      }
+      
+      let schema;
+      try {
+        if (typeof schemaResult === 'string') {
+          schema = JSON.parse(schemaResult);
+        } else {
+          schema = schemaResult;
+        }
+      } catch (error) {
+        console.error("Error parsing schema:", error);
+        throw new Error("Invalid schema format received");
+      }
+      
+      const documentSchema: DocumentSchema = {
+        id: uuidv4(),
+        name: schema.schema.name || `Schema for ${documentDetails.length} document(s)`,
+        description: schema.schema.description || "Automatically generated schema",
+        structure: schema.schema.tables.map((table: any, tableIndex: number) => ({
+          id: uuidv4(),
+          name: table.name,
+          description: table.description || "",
+          displayOrder: tableIndex + 1,
+          fields: table.fields.map((field: any, fieldIndex: number) => ({
+            id: uuidv4(),
+            name: field.name,
+            description: field.description || "",
+            type: field.type || "string",
+            required: field.required || false,
+            enumValues: field.enumValues,
+            displayOrder: fieldIndex + 1
+          }))
+        })),
+        rationale: schema.schema.rationale || "",
+        suggestions: schema.schema.suggestions.map((suggestion: any) => ({
+          id: uuidv4(),
+          description: suggestion.description,
+          type: suggestion.type as "add" | "modify" | "remove",
+          impact: suggestion.impact
+        })),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        organizationId: user?.id || ""
+      };
+      
+      setGeneratedSchema(documentSchema);
+      
+      setProcessStats(prev => ({
+        ...prev,
+        schemaDetails: {
+          tables: documentSchema.structure.length,
+          fields: documentSchema.structure.reduce((count, table) => count + table.fields.length, 0)
+        }
+      }));
+      
+      for (const doc of documentDetails) {
+        updateDocumentStatus(doc.id, "completed");
+      }
+      
+      updateStepStatus("Schema Generation", "completed");
+      console.log("Schema generation completed");
+      
+      await prepareSchemaRefinement(documentSchema);
+      
+    } catch (error) {
+      console.error("Error in generateDocumentSchema:", error);
+      updateStepStatus("Schema Generation", "failed", undefined, error instanceof Error ? error.message : "Unknown error");
+      
+      for (const doc of documentDetails) {
+        updateDocumentStatus(doc.id, "failed", undefined, error instanceof Error ? error.message : "Schema generation failed");
+      }
+      
+      throw error;
+    }
+  };
+
+  const prepareSchemaRefinement = async (schema: DocumentSchema) => {
+    updateStepStatus("Schema Refinement", "in_progress", 0);
+    
+    try {
+      if (documentDetails.length === 0) {
+        throw new Error("No documents available for data extraction");
+      }
+      
+      const exampleDocument = documentDetails[0];
+      
+      console.log(`Extracting data from document ${exampleDocument.id} based on schema`);
+      
+      const extractedResult = await extractDocumentData(exampleDocument.id, schema.id);
+      
+      if (!extractedResult) {
+        throw new Error("Data extraction failed");
+      }
+      
+      let extractedObject;
+      try {
+        if (typeof extractedResult === 'string') {
+          extractedObject = JSON.parse(extractedResult);
+        } else {
+          extractedObject = extractedResult;
+        }
+      } catch (error) {
+        console.error("Error parsing extracted data:", error);
+        throw new Error("Invalid data format received");
+      }
+      
+      setExtractedData(extractedObject);
+      
+      updateStepStatus("Schema Refinement", "in_progress", 100);
+      console.log("Schema refinement preparation completed");
+      
+      setActiveTab("schema");
+      
+    } catch (error) {
+      console.error("Error in prepareSchemaRefinement:", error);
+      updateStepStatus("Schema Refinement", "failed", undefined, error instanceof Error ? error.message : "Unknown error");
+      throw error;
     }
   };
 
@@ -524,6 +582,20 @@ export default function DocumentProcess() {
         <div className="w-[88px]"></div>
       </div>
 
+      {processingError && (
+        <Card className="border-destructive">
+          <CardContent className="pt-6">
+            <div className="flex items-start gap-4">
+              <AlertCircle className="h-5 w-5 text-destructive mt-1" />
+              <div>
+                <h3 className="font-medium text-destructive">Processing Error</h3>
+                <p className="text-sm text-muted-foreground">{processingError}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-1">
           <ProcessingSteps
@@ -567,6 +639,7 @@ export default function DocumentProcess() {
                   schema={generatedSchema}
                   onApprove={handleSchemaApprove}
                   onModify={handleSchemaModify}
+                  extractedData={extractedData}
                 />
               ) : (
                 <Card>

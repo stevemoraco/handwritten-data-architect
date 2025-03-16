@@ -27,6 +27,20 @@ export async function uploadDocument(
   const fileType = file.type === "application/pdf" ? "pdf" : "image";
 
   try {
+    // Create upload progress tracker
+    const uploadId = setProgress ? 
+      uuidv4() : 
+      undefined;
+    
+    if (setProgress && uploadId) {
+      setProgress({
+        id: uploadId,
+        fileName: filename,
+        progress: 0,
+        status: 'uploading'
+      });
+    }
+
     // Create document record first
     const { error: createError } = await supabase
       .from("documents")
@@ -43,9 +57,19 @@ export async function uploadDocument(
       throw new Error(`Failed to create document record: ${createError.message}`);
     }
 
-    // Upload the file
+    // Update progress if callback exists
+    if (setProgress && uploadId) {
+      setProgress({
+        id: uploadId,
+        fileName: filename,
+        progress: 20,
+        status: 'uploading'
+      });
+    }
+
+    // Upload the file to the document_files bucket
     const { error: uploadError } = await supabase.storage
-      .from("documents")
+      .from("document_files")
       .upload(`${userId}/${id}/${filename}`, file, {
         cacheControl: "3600"
       });
@@ -58,9 +82,19 @@ export async function uploadDocument(
       throw new Error(`Failed to upload file: ${uploadError.message}`);
     }
 
+    // Update progress if callback exists
+    if (setProgress && uploadId) {
+      setProgress({
+        id: uploadId,
+        fileName: filename,
+        progress: 60,
+        status: 'uploading'
+      });
+    }
+
     // Get the public URL
     const { data: publicUrlData } = supabase.storage
-      .from("documents")
+      .from("document_files")
       .getPublicUrl(`${userId}/${id}/${filename}`);
 
     // Update document with URL
@@ -84,12 +118,74 @@ export async function uploadDocument(
       message: "Document uploaded successfully"
     });
 
+    // Update progress if callback exists
+    if (setProgress && uploadId) {
+      setProgress({
+        id: uploadId,
+        fileName: filename,
+        progress: 80,
+        status: 'processing',
+        message: 'Starting document processing...'
+      });
+    }
+
+    // Start PDF to images conversion
+    if (fileType === "pdf") {
+      try {
+        const response = await supabase.functions.invoke('pdf-to-images', {
+          body: { documentId: id, userId }
+        });
+
+        if (!response.data.success) {
+          throw new Error(response.data.error || "Unknown error in PDF conversion");
+        }
+
+        // Update progress with page information
+        if (setProgress && uploadId) {
+          setProgress({
+            id: uploadId,
+            fileName: filename,
+            progress: 90,
+            status: 'processing',
+            message: `Processed ${response.data.pageCount} pages`,
+            pageCount: response.data.pageCount,
+            pagesProcessed: response.data.pageCount
+          });
+        }
+      } catch (error) {
+        console.error("Error in PDF to images conversion:", error);
+        // We don't throw here as the upload itself was successful
+      }
+    }
+
+    // Final progress update
+    if (setProgress && uploadId) {
+      setProgress({
+        id: uploadId,
+        fileName: filename,
+        progress: 100,
+        status: 'complete'
+      });
+    }
+
     return {
       id,
       success: true
     };
   } catch (error) {
     console.error("Error in uploadDocument:", error);
+    
+    // Update progress with error if callback exists
+    if (setProgress) {
+      setProgress({
+        id: uuidv4(),
+        fileName: filename,
+        progress: 0,
+        status: 'error',
+        message: error instanceof Error ? error.message : "Unknown error occurred"
+      });
+    }
+    
     const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
 
     // Log the error
@@ -134,11 +230,24 @@ export async function getDocumentById(documentId: string): Promise<Document | nu
       url: data.original_url || "",
       thumbnails: [],
       pageCount: data.page_count || 0,
+      transcription: data.transcription || undefined,
       createdAt: data.created_at,
       updatedAt: data.updated_at,
       userId: data.user_id,
-      organizationId: "default", // Default organization ID since it's required
+      organizationId: data.user_id, // Use user_id as organization for now
+      pipelineId: data.pipeline_id
     };
+
+    // Get document pages
+    const { data: pages, error: pagesError } = await supabase
+      .from("document_pages")
+      .select("*")
+      .eq("document_id", documentId)
+      .order("page_number", { ascending: true });
+
+    if (!pagesError && pages && pages.length > 0) {
+      document.thumbnails = pages.map(page => page.image_url);
+    }
 
     return document;
   } catch (error) {
@@ -169,8 +278,76 @@ export async function getDocumentPages(documentId: string): Promise<any[]> {
   }
 }
 
+export async function transcribeDocument(documentId: string): Promise<string | null> {
+  if (!documentId) return null;
+
+  try {
+    // Call the process-document edge function with the transcribe operation
+    const response = await supabase.functions.invoke('process-document', {
+      body: { documentId, operation: 'transcribe' }
+    });
+
+    if (!response.data.success) {
+      throw new Error(response.data.error || "Unknown error in transcription");
+    }
+
+    return response.data.result.transcription || null;
+  } catch (error) {
+    console.error("Error in transcribeDocument:", error);
+    return null;
+  }
+}
+
+export async function generateSchema(documentIds: string[]): Promise<any | null> {
+  if (!documentIds || documentIds.length === 0) return null;
+
+  try {
+    // Call the process-document edge function with the generateSchema operation
+    const response = await supabase.functions.invoke('process-document', {
+      body: { 
+        documentId: documentIds[0], // Primary document for logs
+        documentIds, // All documents for schema generation
+        operation: 'generateSchema' 
+      }
+    });
+
+    if (!response.data.success) {
+      throw new Error(response.data.error || "Unknown error in schema generation");
+    }
+
+    return response.data.result || null;
+  } catch (error) {
+    console.error("Error in generateSchema:", error);
+    return null;
+  }
+}
+
+export async function extractDocumentData(documentId: string, schemaId: string): Promise<any | null> {
+  if (!documentId || !schemaId) return null;
+
+  try {
+    // Call the process-document edge function with the extractData operation
+    const response = await supabase.functions.invoke('process-document', {
+      body: { 
+        documentId, 
+        schemaId,
+        operation: 'extractData' 
+      }
+    });
+
+    if (!response.data.success) {
+      throw new Error(response.data.error || "Unknown error in data extraction");
+    }
+
+    return response.data.result || null;
+  } catch (error) {
+    console.error("Error in extractDocumentData:", error);
+    return null;
+  }
+}
+
 export function extractTableData(documentId: string): Record<string, Record<string, string>> {
-  // This is a mock function that will later be implemented to extract actual table data
+  // This is a mock function that will later be replaced by actual data from the database
   return {
     "Document Information": {
       "document_id": "DOC-12345",

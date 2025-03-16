@@ -1,3 +1,4 @@
+
 export interface User {
   id: string;
   email: string;
@@ -138,7 +139,8 @@ export interface AIProcessingStep {
 
 export interface GeminiPrompt {
   documentId?: string;
-  pipelineId?: string;
+  documentIds?: string[];
+  schemaId?: string;
   prompt: string;
   context?: string;
   includeImages?: boolean;

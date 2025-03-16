@@ -55,8 +55,10 @@ export type Database = {
           original_url: string | null
           page_count: number | null
           processing_error: string | null
+          processing_progress: number | null
           size: number | null
           status: string
+          transcription: string | null
           type: string
           updated_at: string
           user_id: string
@@ -68,8 +70,10 @@ export type Database = {
           original_url?: string | null
           page_count?: number | null
           processing_error?: string | null
+          processing_progress?: number | null
           size?: number | null
           status: string
+          transcription?: string | null
           type: string
           updated_at?: string
           user_id: string
@@ -81,8 +85,10 @@ export type Database = {
           original_url?: string | null
           page_count?: number | null
           processing_error?: string | null
+          processing_progress?: number | null
           size?: number | null
           status?: string
+          transcription?: string | null
           type?: string
           updated_at?: string
           user_id?: string

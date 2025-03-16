@@ -1,6 +1,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.38.4";
+import * as pdfjs from "https://cdn.skypack.dev/pdfjs-dist@3.4.120/build/pdf.min.js";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -23,10 +24,14 @@ serve(async (req) => {
     }
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    const { documentId } = await req.json();
+    const { documentId, userId } = await req.json();
 
     if (!documentId) {
       throw new Error("Document ID is required");
+    }
+
+    if (!userId) {
+      throw new Error("User ID is required");
     }
 
     console.log(`Converting PDF to images for document ID: ${documentId}`);
@@ -51,31 +56,102 @@ serve(async (req) => {
       message: "PDF to images conversion started",
     });
 
-    // In a real implementation, we would:
-    // 1. Download the PDF from storage
-    // 2. Use a PDF processing library to convert pages to images
-    // 3. Upload each image back to storage
-    // 4. Create document_pages records
+    // Update document status to processing
+    await supabase
+      .from("documents")
+      .update({
+        status: "processing",
+        processing_progress: 0,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", documentId);
 
-    // Mock processing for demonstration
-    console.log("Simulating PDF to images conversion...");
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    // Download the PDF from storage
+    const { data: fileData, error: fileError } = await supabase.storage
+      .from("document_files")
+      .download(`${userId}/${documentId}/${document.name}`);
 
-    // Create mock page entries
+    if (fileError) {
+      throw new Error(`Failed to download PDF: ${fileError.message}`);
+    }
+
+    // Initialize the PDF.js worker
+    pdfjs.GlobalWorkerOptions.workerSrc = "https://cdn.skypack.dev/pdfjs-dist@3.4.120/build/pdf.worker.min.js";
+
+    // Load the PDF document
+    const pdfData = new Uint8Array(await fileData.arrayBuffer());
+    const pdf = await pdfjs.getDocument({ data: pdfData }).promise;
+    const numPages = pdf.numPages;
+
+    console.log(`PDF has ${numPages} pages, starting page extraction`);
+
+    // Process each page
     const pages = [];
-    for (let i = 1; i <= 5; i++) {
-      const imagePath = `${document.user_id}/${documentId}/page_${i}.png`;
+    for (let i = 1; i <= numPages; i++) {
+      console.log(`Processing page ${i} of ${numPages}`);
       
-      // In a real implementation, we would create and upload the actual image here
+      // Update progress
+      await supabase
+        .from("documents")
+        .update({
+          processing_progress: (i / numPages) * 100,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", documentId);
+      
+      // Log page extraction
+      await supabase.from("processing_logs").insert({
+        document_id: documentId,
+        action: `Page ${i} Extraction`,
+        status: "success",
+        message: `Extracting image from page ${i}`,
+      });
+
+      // Get the page
+      const page = await pdf.getPage(i);
+      
+      // Set the scale for rendering (adjust as needed for desired quality)
+      const scale = 1.5;
+      const viewport = page.getViewport({ scale });
+      
+      // Create a canvas for rendering
+      const canvas = new OffscreenCanvas(viewport.width, viewport.height);
+      const context = canvas.getContext("2d");
+      
+      // Render the page to the canvas
+      await page.render({
+        canvasContext: context,
+        viewport,
+      }).promise;
+      
+      // Convert canvas to PNG
+      const imageBlob = await canvas.convertToBlob({ type: "image/png" });
+      const imageName = `page_${i}.png`;
+      
+      // Upload the image to storage
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from("document_images")
+        .upload(`${userId}/${documentId}/${imageName}`, imageBlob, {
+          contentType: "image/png",
+          upsert: true,
+        });
+      
+      if (uploadError) {
+        throw new Error(`Failed to upload page image: ${uploadError.message}`);
+      }
+      
+      // Get the public URL
+      const { data: imagePublicUrlData } = supabase.storage
+        .from("document_images")
+        .getPublicUrl(`${userId}/${documentId}/${imageName}`);
       
       // Create page record
-      const { data: page, error: pageError } = await supabase
+      const { data: pageData, error: pageError } = await supabase
         .from("document_pages")
         .insert({
           document_id: documentId,
           page_number: i,
-          image_url: `https://via.placeholder.com/800x1000?text=Page+${i}`,
-          text_content: `Sample text content for page ${i}`,
+          image_url: imagePublicUrlData.publicUrl,
         })
         .select()
         .single();
@@ -84,7 +160,15 @@ serve(async (req) => {
         throw new Error(`Failed to create page record: ${pageError.message}`);
       }
       
-      pages.push(page);
+      pages.push(pageData);
+      
+      // Log page extraction completion
+      await supabase.from("processing_logs").insert({
+        document_id: documentId,
+        action: `Page ${i} Extraction`,
+        status: "success",
+        message: `Successfully extracted image from page ${i}`,
+      });
     }
 
     // Update document status and page count
@@ -92,7 +176,8 @@ serve(async (req) => {
       .from("documents")
       .update({
         status: "processed",
-        page_count: pages.length,
+        page_count: numPages,
+        processing_progress: 100,
         updated_at: new Date().toISOString(),
       })
       .eq("id", documentId);
@@ -102,15 +187,16 @@ serve(async (req) => {
       document_id: documentId,
       action: "PDF to Images Conversion",
       status: "success",
-      message: `Successfully converted PDF to ${pages.length} images`,
+      message: `Successfully converted PDF to ${numPages} images`,
     });
 
     console.log(`PDF conversion completed for document ID: ${documentId}`);
     return new Response(
       JSON.stringify({ 
         success: true, 
-        message: `Successfully converted PDF to ${pages.length} images`,
-        pages 
+        message: `Successfully converted PDF to ${numPages} images`,
+        pages,
+        pageCount: numPages
       }),
       { 
         headers: { ...corsHeaders, "Content-Type": "application/json" },
