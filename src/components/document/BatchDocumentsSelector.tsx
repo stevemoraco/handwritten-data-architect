@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Check, FileText, CalendarIcon, PipelineIcon, Ban, EyeIcon, FileTypeIcon, PlayIcon, TrashIcon, PlusIcon } from "lucide-react";
+import { Check, FileText, CalendarIcon, Ban, EyeIcon, FileTypeIcon, PlayIcon, TrashIcon, PlusIcon } from "lucide-react";
 import { useDocuments } from "@/context/DocumentContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -38,7 +38,6 @@ export function BatchDocumentsSelector({
     }
   }, [selectedDocumentIds, onSelectionChange]);
 
-  // Group documents by date (today, yesterday, this week, this month, older)
   const documentsByDate = React.useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -78,7 +77,6 @@ export function BatchDocumentsSelector({
     return grouped;
   }, [documents]);
 
-  // Group documents by pipeline association
   const documentsByPipeline = React.useMemo(() => {
     const grouped: Record<string, Document[]> = {
       'No Pipeline': []
@@ -99,7 +97,6 @@ export function BatchDocumentsSelector({
     return grouped;
   }, [documents]);
 
-  // Get filteredDocuments based on active tab
   const filteredDocuments = React.useMemo(() => {
     if (activeTab === "all") {
       return documents;
@@ -130,10 +127,8 @@ export function BatchDocumentsSelector({
 
   const handleSelectAll = () => {
     if (selectedDocumentIds.length === filteredDocuments.length) {
-      // If all are selected, deselect all
       setSelectedDocumentIds([]);
     } else {
-      // Otherwise, select all filtered documents
       setSelectedDocumentIds(filteredDocuments.map(doc => doc.id));
     }
   };
@@ -177,12 +172,10 @@ export function BatchDocumentsSelector({
         break;
         
       case 'process':
-        // For processing, we'll navigate to the process page with selected document IDs
         navigate('/process', { state: { documentIds: selectedDocumentIds } });
         break;
         
       case 'delete':
-        // TO-DO: Implement delete functionality
         toast({
           title: "Delete not implemented",
           description: "Delete functionality is not yet implemented.",
@@ -216,7 +209,6 @@ export function BatchDocumentsSelector({
 
   return (
     <div className={className}>
-      {/* Batch Actions */}
       <div className="mb-4 flex flex-wrap gap-2">
         <Button 
           variant="outline" 
@@ -286,7 +278,6 @@ export function BatchDocumentsSelector({
         </div>
       </div>
       
-      {/* Category Tabs */}
       <Tabs defaultValue="all" value={activeTab} onValueChange={setActiveTab} className="mb-6">
         <TabsList className="mb-4 flex-wrap h-auto py-2">
           <TabsTrigger value="all" className="mb-1">All Documents</TabsTrigger>
@@ -294,7 +285,6 @@ export function BatchDocumentsSelector({
             <Ban className="h-4 w-4 mr-1" /> No Pipeline
           </TabsTrigger>
           
-          {/* Date categories */}
           <TabsTrigger value="date-header" disabled className="mb-1 font-bold">
             <CalendarIcon className="h-4 w-4 mr-1" /> By Date
           </TabsTrigger>
@@ -306,7 +296,6 @@ export function BatchDocumentsSelector({
             )
           )}
           
-          {/* Pipeline categories */}
           {Object.entries(documentsByPipeline)
             .filter(([pipelineId, _]) => pipelineId !== 'No Pipeline')
             .map(([pipelineId, docs]) => (
@@ -353,12 +342,10 @@ interface DocumentCardProps {
 }
 
 function DocumentCard({ document, isSelected, onSelect }: DocumentCardProps) {
-  // Determine if document is ready for processing
   const isReady = document.status === "processed" && 
                  document.thumbnails && 
                  document.thumbnails.length > 0;
 
-  // Get status badge
   const getStatusBadge = () => {
     switch (document.status) {
       case "processed":
@@ -374,7 +361,6 @@ function DocumentCard({ document, isSelected, onSelect }: DocumentCardProps) {
     }
   };
 
-  // Format date to a readable format
   const formatDate = (dateString: string) => {
     try {
       return format(new Date(dateString), 'MMM d, yyyy');
