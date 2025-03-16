@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Progress } from '@/components/ui/progress';
@@ -11,6 +10,7 @@ import { useUpload } from '@/context/UploadContext';
 import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocumentProxy } from 'pdfjs-dist/types/src/display/api';
 import { supabase } from '@/integrations/supabase/client';
+import { toast } from "@/hooks/use-toast";
 
 // Configure the worker source with a stable and reliable CDN URL
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
@@ -58,7 +58,6 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
   const { uploads, isUploading, addUpload, updateUploadProgress, updateUploadStatus, updatePageProgress } = useUpload();
   const [userId, setUserId] = useState<string | null>(null);
   
-  // Get the current user id once on component mount
   useEffect(() => {
     const fetchUserId = async () => {
       const { data } = await supabase.auth.getUser();
@@ -121,7 +120,6 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
     try {
       const fileArrayBuffer = await file.arrayBuffer();
       
-      // Load the PDF using PDF.js
       const pdf = await pdfjsLib.getDocument({ data: fileArrayBuffer }).promise;
       const pageCount = pdf.numPages;
       
@@ -134,7 +132,6 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
       
       const pageDataObjects = await Promise.all(pagePromises);
       
-      // Update the preview with the rendered pages
       setFilePreviews(prev => 
         prev.map(p => 
           p.file === file 
@@ -173,10 +170,8 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
         viewport
       }).promise;
       
-      // Get the data URL for preview
       const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
       
-      // Also create a blob for later uploading
       return new Promise<{pageNumber: number, dataUrl: string, imageBlob: Blob}>((resolve, reject) => {
         canvas.toBlob((blob) => {
           if (blob) {
@@ -204,7 +199,6 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
         const dataUrl = e.target?.result as string;
         
         if (dataUrl) {
-          // Create a blob from the data URL for later uploading
           fetch(dataUrl)
             .then(res => res.blob())
             .then(imageBlob => {
@@ -242,13 +236,11 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
     });
   };
 
-  // Function to directly upload page images to Supabase Storage
   const uploadPageImagesToStorage = async (documentId: string, preview: FilePreview): Promise<string[]> => {
     if (!userId) throw new Error('User not authenticated');
     
     const imageUrls: string[] = [];
     
-    // Upload each page as an image
     for (let i = 0; i < preview.pages.length; i++) {
       const page = preview.pages[i];
       if (!page.imageBlob) continue;
@@ -267,7 +259,6 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
         throw uploadError;
       }
       
-      // Get the public URL
       const { data: urlData } = supabase.storage
         .from('document_files')
         .getPublicUrl(filePath);
@@ -280,11 +271,9 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
     return imageUrls;
   };
 
-  // Upload original file directly to storage and get immediate URL
   const uploadOriginalFile = async (file: File): Promise<string> => {
     if (!userId) throw new Error('User not authenticated');
     
-    // Create a temporary ID for the file
     const tempId = Math.random().toString(36).substring(2, 15);
     const filePath = `${userId}/temp/${tempId}/${file.name}`;
     
@@ -300,7 +289,6 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
       throw uploadError;
     }
     
-    // Get the public URL
     const { data: urlData } = supabase.storage
       .from('document_files')
       .getPublicUrl(filePath);
@@ -309,7 +297,6 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
       throw new Error('Failed to get public URL for uploaded file');
     }
     
-    // Update the file preview with the storage URL
     setFilePreviews(prev => 
       prev.map(p => 
         p.file === file 
@@ -321,7 +308,6 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
     return urlData.publicUrl;
   };
 
-  // This function would be called from the DocumentUpload component to upload the preview images
   const getPreviewsForFile = (file: File): FilePreview | undefined => {
     return filePreviews.find(preview => preview.file === file);
   };
@@ -345,7 +331,6 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
     disabled: disabled || isUploading,
   });
 
-  // Expose methods to parent components using useImperativeHandle
   useImperativeHandle(ref, () => ({
     getPreviewsForFile,
     uploadPageImagesToStorage
@@ -399,7 +384,6 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
           <p className="text-sm font-medium">Selected Files</p>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             {filePreviews.map((preview) => {
-              // Find corresponding upload status if it exists
               const uploadStatus = uploads.find(upload => upload.fileName === preview.file.name);
               
               return (
@@ -553,3 +537,4 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
 });
 
 FileUpload.displayName = 'FileUpload';
+
