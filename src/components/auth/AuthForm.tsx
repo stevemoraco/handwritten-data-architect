@@ -110,6 +110,18 @@ export function AuthForm({ onComplete, redirectPath = "/process", initialView = 
     try {
       setIsSubmitting(true);
       await signInWithGoogle();
+      
+      // Open popup window for Google auth
+      const width = 500;
+      const height = 600;
+      const left = window.screenX + (window.outerWidth - width) / 2;
+      const top = window.screenY + (window.outerHeight - height) / 2;
+      
+      window.open(
+        `${window.location.origin}/auth/callback`,
+        'Google Sign In',
+        `width=${width},height=${height},left=${left},top=${top}`
+      );
     } catch (error) {
       console.error("Google sign in error:", error);
       setIsSubmitting(false);
