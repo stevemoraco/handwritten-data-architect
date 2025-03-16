@@ -7,12 +7,14 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "@/components/ui/use-toast";
+import { useNavigate } from "react-router-dom";
 
 interface AuthFormProps {
   onComplete?: () => void;
+  redirectPath?: string;
 }
 
-export function AuthForm({ onComplete }: AuthFormProps) {
+export function AuthForm({ onComplete, redirectPath = "/process" }: AuthFormProps) {
   const [activeTab, setActiveTab] = useState("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -20,13 +22,19 @@ export function AuthForm({ onComplete }: AuthFormProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   
   const { login, register, user } = useAuth();
+  const navigate = useNavigate();
 
-  // If user is already logged in, call onComplete
+  // If user is already logged in, redirect immediately
   useEffect(() => {
-    if (user && onComplete) {
-      onComplete();
+    if (user) {
+      console.log("User already logged in, redirecting to:", redirectPath);
+      if (onComplete) {
+        onComplete();
+      } else {
+        navigate(redirectPath);
+      }
     }
-  }, [user, onComplete]);
+  }, [user, onComplete, navigate, redirectPath]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,17 +45,22 @@ export function AuthForm({ onComplete }: AuthFormProps) {
     
     try {
       await login(email, password);
-      // The login function will handle showing success/error messages
-      if (onComplete) onComplete();
+      console.log("Login successful, redirecting to:", redirectPath);
+      
+      // The login function updates the user state, which will trigger the useEffect above
+      // But we'll also handle immediate redirection here in case the state update is delayed
+      if (onComplete) {
+        onComplete();
+      } else {
+        navigate(redirectPath);
+      }
     } catch (error) {
-      // This will catch and handle any errors not caught in the login function
       console.error("Login error:", error);
       toast({
         title: "Login failed",
         description: error instanceof Error ? error.message : "An unknown error occurred. Please try again.",
         variant: "destructive",
       });
-    } finally {
       setIsSubmitting(false);
     }
   };
@@ -61,17 +74,22 @@ export function AuthForm({ onComplete }: AuthFormProps) {
     
     try {
       await register(name, email, password);
-      // The register function will handle showing success/error messages
-      if (onComplete) onComplete();
+      console.log("Registration successful, redirecting to:", redirectPath);
+      
+      // The register function updates the user state, which will trigger the useEffect above
+      // But we'll also handle immediate redirection here in case the state update is delayed
+      if (onComplete) {
+        onComplete();
+      } else {
+        navigate(redirectPath);
+      }
     } catch (error) {
-      // This will catch and handle any errors not caught in the register function
       console.error("Register error:", error);
       toast({
         title: "Registration failed",
         description: error instanceof Error ? error.message : "An unknown error occurred. Please try again.",
         variant: "destructive",
       });
-    } finally {
       setIsSubmitting(false);
     }
   };
@@ -112,6 +130,11 @@ export function AuthForm({ onComplete }: AuthFormProps) {
         setIsSubmitting(false);
       });
   };
+
+  // If already logged in, don't render the form
+  if (user) {
+    return null;
+  }
 
   return (
     <div className="w-full max-w-md mx-auto">

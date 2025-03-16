@@ -12,6 +12,13 @@ export default function Index() {
   const navigate = useNavigate();
   const [showLoginModal, setShowLoginModal] = React.useState(false);
   
+  // If user is already logged in, redirect to process page
+  React.useEffect(() => {
+    if (user) {
+      navigate("/process");
+    }
+  }, [user, navigate]);
+  
   const handleStartProcessing = () => {
     if (!user) {
       setShowLoginModal(true);
@@ -62,6 +69,7 @@ export default function Index() {
         open={showLoginModal} 
         onOpenChange={setShowLoginModal} 
         onComplete={handleLoginComplete}
+        redirectPath="/process"
       />
     </div>
   );
