@@ -32,73 +32,122 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
+  // Initialize auth state
   useEffect(() => {
-    // Check for existing session
-    const checkSession = async () => {
+    const initializeAuth = async () => {
+      setIsLoading(true);
+      
       try {
-        const { data: { session }, error } = await supabase.auth.getSession();
+        // Get the initial session
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
         
-        if (error) {
-          console.error('Error fetching session:', error);
-          setIsLoading(false);
+        if (sessionError) {
+          console.error('Error fetching session:', sessionError);
           return;
         }
         
+        // If we have a session, get the user data
         if (session) {
-          const { data: authUser } = await supabase.auth.getUser();
+          const { data: userData, error: userError } = await supabase.auth.getUser();
           
-          if (authUser && authUser.user) {
+          if (userError) {
+            console.error('Error fetching user data:', userError);
+            return;
+          }
+          
+          if (userData && userData.user) {
             const currentUser: User = {
-              id: authUser.user.id,
-              email: authUser.user.email || '',
-              name: authUser.user.user_metadata?.name || authUser.user.email?.split('@')[0] || 'User',
-              createdAt: authUser.user.created_at,
-              organizationId: authUser.user.user_metadata?.organization_id || '',
+              id: userData.user.id,
+              email: userData.user.email || '',
+              name: userData.user.user_metadata?.name || userData.user.email?.split('@')[0] || 'User',
+              createdAt: userData.user.created_at,
+              organizationId: userData.user.user_metadata?.organization_id || '',
             };
             
             setUser(currentUser);
+            console.log('User initialized from session:', currentUser.email);
           }
         }
       } catch (error) {
-        console.error('Failed to restore session', error);
+        console.error('Failed to initialize auth:', error);
       } finally {
         setIsLoading(false);
       }
     };
-
+    
+    initializeAuth();
+    
     // Set up auth state listener
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('Auth state change:', event);
+      console.log('Auth state change:', event, session?.user?.email);
       
       if (event === 'SIGNED_IN' && session) {
-        const { data: authUser } = await supabase.auth.getUser();
-        
-        if (authUser && authUser.user) {
-          const currentUser: User = {
-            id: authUser.user.id,
-            email: authUser.user.email || '',
-            name: authUser.user.user_metadata?.name || authUser.user.email?.split('@')[0] || 'User',
-            createdAt: authUser.user.created_at,
-            organizationId: authUser.user.user_metadata?.organization_id || '',
-          };
+        try {
+          const { data: userData } = await supabase.auth.getUser();
           
-          setUser(currentUser);
+          if (userData && userData.user) {
+            const currentUser: User = {
+              id: userData.user.id,
+              email: userData.user.email || '',
+              name: userData.user.user_metadata?.name || userData.user.email?.split('@')[0] || 'User',
+              createdAt: userData.user.created_at,
+              organizationId: userData.user.user_metadata?.organization_id || '',
+            };
+            
+            setUser(currentUser);
+            console.log('User set after sign in:', currentUser.email);
+          }
+        } catch (error) {
+          console.error('Error updating user after sign in:', error);
         }
       } else if (event === 'SIGNED_OUT') {
         setUser(null);
+        console.log('User signed out');
+      } else if (event === 'TOKEN_REFRESHED') {
+        console.log('Token refreshed');
+      } else if (event === 'USER_UPDATED') {
+        // Refresh user data if it's updated
+        try {
+          const { data: userData } = await supabase.auth.getUser();
+          
+          if (userData && userData.user) {
+            const currentUser: User = {
+              id: userData.user.id,
+              email: userData.user.email || '',
+              name: userData.user.user_metadata?.name || userData.user.email?.split('@')[0] || 'User',
+              createdAt: userData.user.created_at,
+              organizationId: userData.user.user_metadata?.organization_id || '',
+            };
+            
+            setUser(currentUser);
+            console.log('User updated:', currentUser.email);
+          }
+        } catch (error) {
+          console.error('Error updating user data:', error);
+        }
       }
     });
-
-    checkSession();
-
+    
     return () => {
       authListener.subscription.unsubscribe();
     };
   }, []);
 
   const login = async (email: string, password: string) => {
-    setIsLoading(true);
     try {
+      setIsLoading(true);
+      
+      // Check if user is already logged in
+      const { data: currentSession } = await supabase.auth.getSession();
+      if (currentSession.session) {
+        console.log('User is already logged in:', currentSession.session.user.email);
+        toast({
+          title: "Already logged in",
+          description: "You are already logged in with this account.",
+        });
+        return;
+      }
+      
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -113,6 +162,10 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       }
       
       // User will be set by the auth state listener
+      toast({
+        title: "Login successful",
+        description: "Welcome back!",
+      });
     } catch (error) {
       toast({
         title: "Login failed",

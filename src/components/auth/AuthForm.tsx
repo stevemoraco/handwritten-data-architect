@@ -1,6 +1,6 @@
 
 import * as React from "react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,7 +19,14 @@ export function AuthForm({ onComplete }: AuthFormProps) {
   const [name, setName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   
-  const { login, register } = useAuth();
+  const { login, register, user } = useAuth();
+
+  // If user is already logged in, call onComplete
+  useEffect(() => {
+    if (user && onComplete) {
+      onComplete();
+    }
+  }, [user, onComplete]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,17 +34,10 @@ export function AuthForm({ onComplete }: AuthFormProps) {
     
     try {
       await login(email, password);
-      toast({
-        title: "Welcome back!",
-        description: "You've successfully logged in.",
-      });
       if (onComplete) onComplete();
     } catch (error) {
-      toast({
-        title: "Login failed",
-        description: error instanceof Error ? error.message : "An error occurred",
-        variant: "destructive",
-      });
+      // Error is already handled in the login function
+      console.error("Login error:", error);
     } finally {
       setIsSubmitting(false);
     }
@@ -49,20 +49,21 @@ export function AuthForm({ onComplete }: AuthFormProps) {
     
     try {
       await register(name, email, password);
-      toast({
-        title: "Account created",
-        description: "Your account has been created successfully.",
-      });
       if (onComplete) onComplete();
     } catch (error) {
-      toast({
-        title: "Registration failed",
-        description: error instanceof Error ? error.message : "An error occurred",
-        variant: "destructive",
-      });
+      // Error is already handled in the register function
+      console.error("Register error:", error);
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleForgotPassword = () => {
+    // This is currently a placeholder - we can implement password reset functionality here
+    toast({
+      title: "Reset password",
+      description: "Password reset functionality will be implemented soon.",
+    });
   };
 
   return (
@@ -91,7 +92,12 @@ export function AuthForm({ onComplete }: AuthFormProps) {
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label htmlFor="password">Password</Label>
-                <Button variant="link" className="p-0 h-auto text-xs">
+                <Button 
+                  variant="link" 
+                  className="p-0 h-auto text-xs" 
+                  type="button"
+                  onClick={handleForgotPassword}
+                >
                   Forgot Password?
                 </Button>
               </div>
