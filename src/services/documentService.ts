@@ -1,4 +1,3 @@
-
 import { v4 as uuidv4 } from "uuid";
 import { supabase } from "@/integrations/supabase/client";
 import { Document, DocumentData, ProcessingLog, UploadProgress } from "@/types";
@@ -460,6 +459,35 @@ export async function extractDocumentData(documentId: string, schemaId: string):
   }
 }
 
+export function extractTableData(documentId: string): Record<string, Record<string, string>> {
+  // This is a helper function to transform the extracted data into a more usable format for the UI
+  // In a real implementation, this would fetch data from the database
+  // For now, returning mock data for demonstration purposes
+  return {
+    "Invoice": {
+      "Invoice Number": "INV-2023-001",
+      "Date": "2023-05-15",
+      "Due Date": "2023-06-15",
+      "Total Amount": "$1,250.00"
+    },
+    "Customer": {
+      "Name": "Acme Corporation",
+      "Address": "123 Business Ave, Suite 100",
+      "City": "San Francisco",
+      "State": "CA",
+      "ZIP": "94107",
+      "Contact": "John Smith"
+    },
+    "Items": {
+      "Item 1": "Professional Services",
+      "Description": "Consulting - 10 hours",
+      "Quantity": "10",
+      "Rate": "$125.00",
+      "Amount": "$1,250.00"
+    }
+  };
+}
+
 export function getExtractedData(documentId: string): Promise<DocumentData[]> {
   return new Promise(async (resolve, reject) => {
     try {
@@ -480,7 +508,8 @@ export function getExtractedData(documentId: string): Promise<DocumentData[]> {
         fieldId: item.field_id,
         value: item.value || "",
         confidence: item.confidence || 0,
-        createdAt: item.created_at
+        createdAt: item.created_at,
+        updatedAt: item.created_at // Use created_at as updatedAt since it's not in the database
       }));
       
       resolve(formattedData);
