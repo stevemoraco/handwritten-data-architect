@@ -58,10 +58,18 @@ export function LoginModal({ open, onOpenChange, onComplete, redirectPath }: Log
             <TabsTrigger value="register">Sign Up</TabsTrigger>
           </TabsList>
           <TabsContent value="login">
-            <AuthForm onComplete={handleComplete} redirectPath={redirectPath} initialView="login" />
+            <AuthForm 
+              onComplete={handleComplete} 
+              redirectPath={redirectPath} 
+              initialView="login" 
+            />
           </TabsContent>
           <TabsContent value="register">
-            <AuthForm onComplete={handleComplete} redirectPath={redirectPath} initialView="register" />
+            <AuthForm 
+              onComplete={handleComplete} 
+              redirectPath={redirectPath} 
+              initialView="register" 
+            />
           </TabsContent>
         </Tabs>
       </DialogContent>

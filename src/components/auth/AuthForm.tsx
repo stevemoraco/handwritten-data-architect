@@ -23,7 +23,6 @@ export function AuthForm({ onComplete, redirectPath = "/process", initialView = 
   const { login, register, user } = useAuth();
   const navigate = useNavigate();
 
-  // If user is already logged in, redirect immediately
   useEffect(() => {
     if (user) {
       console.log("User already logged in, redirecting to:", redirectPath);
@@ -38,7 +37,7 @@ export function AuthForm({ onComplete, redirectPath = "/process", initialView = 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (isSubmitting) return; // Prevent multiple submissions
+    if (isSubmitting) return;
     
     setIsSubmitting(true);
     
@@ -46,8 +45,6 @@ export function AuthForm({ onComplete, redirectPath = "/process", initialView = 
       await login(email, password);
       console.log("Login successful, redirecting to:", redirectPath);
       
-      // The login function updates the user state, which will trigger the useEffect above
-      // But we'll also handle immediate redirection here in case the state update is delayed
       if (onComplete) {
         onComplete();
       } else {
@@ -67,7 +64,7 @@ export function AuthForm({ onComplete, redirectPath = "/process", initialView = 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (isSubmitting) return; // Prevent multiple submissions
+    if (isSubmitting) return;
     
     setIsSubmitting(true);
     
@@ -75,8 +72,6 @@ export function AuthForm({ onComplete, redirectPath = "/process", initialView = 
       await register(name, email, password);
       console.log("Registration successful, redirecting to:", redirectPath);
       
-      // The register function updates the user state, which will trigger the useEffect above
-      // But we'll also handle immediate redirection here in case the state update is delayed
       if (onComplete) {
         onComplete();
       } else {
@@ -107,7 +102,6 @@ export function AuthForm({ onComplete, redirectPath = "/process", initialView = 
     
     setIsSubmitting(true);
     
-    // Get the forgotPassword function from useAuth
     const { forgotPassword } = useAuth();
     
     forgotPassword(email)
@@ -130,7 +124,6 @@ export function AuthForm({ onComplete, redirectPath = "/process", initialView = 
       });
   };
 
-  // If already logged in, don't render the form
   if (user) {
     return null;
   }

@@ -1,4 +1,3 @@
-
 import * as React from "react";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -12,7 +11,6 @@ export default function Index() {
   const navigate = useNavigate();
   const [showLoginModal, setShowLoginModal] = React.useState(false);
   
-  // If user is already logged in, redirect to process page
   React.useEffect(() => {
     if (user) {
       navigate("/process");
@@ -34,7 +32,6 @@ export default function Index() {
   
   return (
     <div className="min-h-screen flex flex-col">
-      {/* Simple Header/Nav */}
       <header className="border-b bg-background py-4">
         <div className="container flex items-center justify-between">
           <div className="flex items-center space-x-2">
@@ -57,7 +54,6 @@ export default function Index() {
         </div>
       </header>
 
-      {/* Hero Section */}
       <section className="py-20 text-center">
         <div className="container space-y-6 max-w-3xl">
           <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight">Handwriting Digitizer</h1>
@@ -92,7 +88,6 @@ export default function Index() {
         </div>
       </section>
       
-      {/* Upload Demo Section */}
       <section className="bg-muted/30 py-16">
         <div className="container max-w-5xl">
           <div className="text-center mb-10">
@@ -128,13 +123,11 @@ export default function Index() {
         </div>
       </section>
       
-      {/* How It Works Section */}
       <section className="py-16">
         <div className="container max-w-6xl">
           <h2 className="text-2xl font-bold mb-10">How It Works</h2>
           
           <div className="grid md:grid-cols-3 gap-8">
-            {/* Step 1 */}
             <div className="space-y-4">
               <div className="bg-primary/10 rounded-full p-4 inline-flex">
                 <Upload className="h-6 w-6 text-primary" />
@@ -145,7 +138,6 @@ export default function Index() {
               </p>
             </div>
             
-            {/* Step 2 */}
             <div className="space-y-4">
               <div className="bg-primary/10 rounded-full p-4 inline-flex">
                 <ClipboardCheck className="h-6 w-6 text-primary" />
@@ -156,7 +148,6 @@ export default function Index() {
               </p>
             </div>
             
-            {/* Step 3 */}
             <div className="space-y-4">
               <div className="bg-primary/10 rounded-full p-4 inline-flex">
                 <FileText className="h-6 w-6 text-primary" />
@@ -170,7 +161,6 @@ export default function Index() {
         </div>
       </section>
       
-      {/* Footer */}
       <footer className="mt-auto bg-muted/30 border-t py-12">
         <div className="container">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
@@ -227,7 +217,6 @@ export default function Index() {
         </div>
       </footer>
 
-      {/* Login modal */}
       <LoginModal 
         open={showLoginModal} 
         onOpenChange={setShowLoginModal} 
