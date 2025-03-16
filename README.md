@@ -66,6 +66,7 @@ This README provides a comprehensive guide to understanding, setting up, develop
 
 The project follows a standard React application structure, with additional directories for Supabase integration and specific components:
 
+```filetree
 workspace/
 ├── .cache # Vite's cache directory
 ├── .git # Git repository
@@ -106,6 +107,7 @@ workspace/
 | └── index.ts
 ├── tailwind.config.ts # Tailwind CSS configuration
 └── vite.config.ts # Vite configuration
+```
 
 ## Setup and Installation
 
