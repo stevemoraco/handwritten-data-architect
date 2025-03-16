@@ -4,7 +4,6 @@ import { FileUpload } from "@/components/ui/file-upload";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useUpload } from "@/context/UploadContext";
-import { useDocuments } from "@/context/DocumentContext";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "@/components/ui/use-toast";
 import { ArrowRight, FileText, Lock, Shield, User, AlertTriangle } from "lucide-react";
@@ -34,17 +33,29 @@ export function DocumentUpload({
   const { isUploading, uploads, addUpload, updateUploadProgress, updateUploadStatus } = useUpload();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [selectedFiles, setSelectedFiles] = React.useState<File[]>([]);
   const [uploadedDocumentIds, setUploadedDocumentIds] = React.useState<string[]>([]);
   const [showAuthDialog, setShowAuthDialog] = React.useState(false);
   const [isProcessing, setIsProcessing] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  const handleFilesUploaded = async (files: File[]) => {
+  const handleFilesSelected = (files: File[]) => {
+    if (!user) {
+      setSelectedFiles(files);
+      setShowAuthDialog(true);
+      return;
+    }
+    
+    setSelectedFiles(files);
+    startUpload(files);
+  };
+  
+  const startUpload = async (files: File[]) => {
     if (!user) {
       setShowAuthDialog(true);
       return;
     }
-
+    
     setError(null);
     
     try {
@@ -88,15 +99,47 @@ export function DocumentUpload({
             const filePath = `${user.id}/${document.id}/${file.name}`;
             
             // Upload file to storage with progress tracking
-            const { error: uploadError } = await supabase.storage
-              .from('document_files')
-              .upload(filePath, file, {
-                onUploadProgress: (progress) => {
-                  const percent = Math.round((progress.loaded / progress.total) * 100);
-                  updateUploadProgress(uploadId, percent);
-                  console.log(`Upload progress for ${file.name}: ${percent}%`);
+            const uploadOptions = {
+              cacheControl: '3600'
+            };
+            
+            let lastProgress = 0;
+            
+            // Use XMLHttpRequest for upload with progress
+            const xhr = new XMLHttpRequest();
+            const uploadPromise = new Promise<void>((resolve, reject) => {
+              xhr.upload.addEventListener('progress', (event) => {
+                if (event.lengthComputable) {
+                  const percent = Math.round((event.loaded / event.total) * 100);
+                  if (percent > lastProgress) {
+                    lastProgress = percent;
+                    updateUploadProgress(uploadId, percent);
+                    console.log(`Upload progress for ${file.name}: ${percent}%`);
+                  }
                 }
               });
+              
+              xhr.addEventListener('error', () => {
+                reject(new Error('XHR error occurred during upload'));
+              });
+              
+              xhr.addEventListener('abort', () => {
+                reject(new Error('Upload aborted'));
+              });
+              
+              xhr.addEventListener('load', () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                  resolve();
+                } else {
+                  reject(new Error(`HTTP error ${xhr.status}: ${xhr.statusText}`));
+                }
+              });
+            });
+            
+            // Use Supabase upload without onUploadProgress
+            const { error: uploadError } = await supabase.storage
+              .from('document_files')
+              .upload(filePath, file, uploadOptions);
             
             if (uploadError) {
               // Update document status and log error
@@ -237,6 +280,11 @@ export function DocumentUpload({
       title: "Account created successfully",
       description: "You can now securely upload and process your documents.",
     });
+    
+    // Start upload process if files were selected before authentication
+    if (selectedFiles.length > 0) {
+      startUpload(selectedFiles);
+    }
   };
 
   const successfulUploads = uploads.filter(upload => upload.status === "complete").length;
@@ -279,7 +327,7 @@ export function DocumentUpload({
           )}
 
           <FileUpload
-            onFilesUploaded={handleFilesUploaded}
+            onFilesUploaded={handleFilesSelected}
             accept={{ 'application/pdf': ['.pdf'] }}
             disabled={isUploading || isProcessing}
           />

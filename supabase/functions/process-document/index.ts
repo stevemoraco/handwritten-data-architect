@@ -29,7 +29,8 @@ serve(async (req) => {
     }
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    const { documentId } = await req.json();
+    const requestData = await req.json();
+    const { documentId } = requestData;
 
     if (!documentId) {
       throw new Error("Document ID is required");
@@ -57,13 +58,12 @@ serve(async (req) => {
       message: "Document processing started",
     });
 
+    // Simulate document processing for demonstration
     // In a real implementation, we would:
     // 1. Download the PDF from storage
     // 2. Split into pages and save each page as an image
     // 3. Extract text from each page using OCR or text extraction
     // 4. Update document status and metadata
-
-    // Mock processing for demonstration
     console.log("Simulating document processing...");
     await new Promise(resolve => setTimeout(resolve, 2000));
 
@@ -125,6 +125,8 @@ serve(async (req) => {
       
       if (supabaseUrl && supabaseServiceKey) {
         const supabase = createClient(supabaseUrl, supabaseServiceKey);
+        
+        // Parse request body to get documentId
         const body = await req.json().catch(() => ({}));
         
         if (body.documentId) {

@@ -30,7 +30,7 @@ export function FileUpload({
   disabled = false,
 }: FileUploadProps) {
   const [files, setFiles] = useState<File[]>([]);
-  const { uploads, addUpload, updateUploadProgress, updateUploadStatus, isUploading } = useUpload();
+  const { uploads, isUploading } = useUpload();
 
   const onDrop = useCallback(
     (acceptedFiles: File[]) => {
@@ -43,32 +43,11 @@ export function FileUpload({
           onFilesUploaded(newFiles);
         }
 
-        // Simulate file upload for each file
-        newFiles.forEach((file) => {
-          const uploadId = addUpload(file.name);
-          simulateFileUpload(file, uploadId);
-        });
-
         return [...currentFiles, ...newFiles];
       });
     },
-    [addUpload, onFilesUploaded]
+    [onFilesUploaded]
   );
-
-  const simulateFileUpload = (file: File, uploadId: string) => {
-    let progress = 0;
-    const interval = setInterval(() => {
-      progress += Math.floor(Math.random() * 10) + 5;
-      if (progress >= 100) {
-        clearInterval(interval);
-        progress = 100;
-        updateUploadProgress(uploadId, progress);
-        updateUploadStatus(uploadId, 'complete');
-      } else {
-        updateUploadProgress(uploadId, progress);
-      }
-    }, 300);
-  };
 
   const { getRootProps, getInputProps, isDragActive, isDragReject } = useDropzone({
     onDrop,

@@ -2,6 +2,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { User } from '@/types';
 import { toast } from '@/components/ui/use-toast';
+import { supabase } from '@/integrations/supabase/client';
 
 interface AuthContextType {
   user: User | null;
@@ -32,29 +33,31 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
   useEffect(() => {
-    // Check for existing session or create a default one for demo
+    // Check for existing session
     const checkSession = async () => {
       try {
-        // This would be replaced with an actual API call
-        const storedUser = localStorage.getItem('user');
-        if (storedUser) {
-          setUser(JSON.parse(storedUser));
-        } else {
-          // For demo purposes, create a default logged in user
-          const defaultUser: User = {
-            id: '1',
-            email: 'demo@example.com',
-            name: 'Demo User',
-            createdAt: new Date().toISOString(),
-            organizationId: '1',
-          };
-          localStorage.setItem('user', JSON.stringify(defaultUser));
-          setUser(defaultUser);
+        const { data: { session }, error } = await supabase.auth.getSession();
+        
+        if (error) {
+          console.error('Error fetching session:', error);
+          setIsLoading(false);
+          return;
+        }
+        
+        if (session) {
+          const { data: authUser } = await supabase.auth.getUser();
           
-          toast({
-            title: "Logged in as Demo User",
-            description: "For demo purposes, you've been automatically logged in.",
-          });
+          if (authUser && authUser.user) {
+            const currentUser: User = {
+              id: authUser.user.id,
+              email: authUser.user.email || '',
+              name: authUser.user.user_metadata?.name || authUser.user.email?.split('@')[0] || 'User',
+              createdAt: authUser.user.created_at,
+              organizationId: authUser.user.user_metadata?.organization_id || '',
+            };
+            
+            setUser(currentUser);
+          }
         }
       } catch (error) {
         console.error('Failed to restore session', error);
@@ -63,23 +66,60 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       }
     };
 
+    // Set up auth state listener
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('Auth state change:', event);
+      
+      if (event === 'SIGNED_IN' && session) {
+        const { data: authUser } = await supabase.auth.getUser();
+        
+        if (authUser && authUser.user) {
+          const currentUser: User = {
+            id: authUser.user.id,
+            email: authUser.user.email || '',
+            name: authUser.user.user_metadata?.name || authUser.user.email?.split('@')[0] || 'User',
+            createdAt: authUser.user.created_at,
+            organizationId: authUser.user.user_metadata?.organization_id || '',
+          };
+          
+          setUser(currentUser);
+        }
+      } else if (event === 'SIGNED_OUT') {
+        setUser(null);
+      }
+    });
+
     checkSession();
+
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
   }, []);
 
   const login = async (email: string, password: string) => {
     setIsLoading(true);
     try {
-      // This would be replaced with an actual API call
-      const mockUser: User = {
-        id: '1',
+      const { data, error } = await supabase.auth.signInWithPassword({
         email,
-        name: 'Demo User',
-        createdAt: new Date().toISOString(),
-        organizationId: '1',
-      };
+        password,
+      });
       
-      localStorage.setItem('user', JSON.stringify(mockUser));
-      setUser(mockUser);
+      if (error) {
+        throw new Error(error.message);
+      }
+      
+      if (!data.user) {
+        throw new Error('Login failed: No user returned');
+      }
+      
+      // User will be set by the auth state listener
+    } catch (error) {
+      toast({
+        title: "Login failed",
+        description: error instanceof Error ? error.message : "An unknown error occurred",
+        variant: "destructive",
+      });
+      throw error;
     } finally {
       setIsLoading(false);
     }
@@ -88,17 +128,36 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const register = async (name: string, email: string, password: string) => {
     setIsLoading(true);
     try {
-      // This would be replaced with an actual API call
-      const mockUser: User = {
-        id: '1',
+      const { data, error } = await supabase.auth.signUp({
         email,
-        name,
-        createdAt: new Date().toISOString(),
-        organizationId: '1',
-      };
+        password,
+        options: {
+          data: {
+            name,
+          },
+        },
+      });
       
-      localStorage.setItem('user', JSON.stringify(mockUser));
-      setUser(mockUser);
+      if (error) {
+        throw new Error(error.message);
+      }
+      
+      if (!data.user) {
+        throw new Error('Registration failed: No user returned');
+      }
+      
+      // User will be set by the auth state listener
+      toast({
+        title: "Registration successful",
+        description: "Your account has been created successfully.",
+      });
+    } catch (error) {
+      toast({
+        title: "Registration failed",
+        description: error instanceof Error ? error.message : "An unknown error occurred",
+        variant: "destructive",
+      });
+      throw error;
     } finally {
       setIsLoading(false);
     }
@@ -107,22 +166,74 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const logout = async () => {
     setIsLoading(true);
     try {
-      // This would be replaced with an actual API call
-      localStorage.removeItem('user');
-      setUser(null);
+      const { error } = await supabase.auth.signOut();
+      
+      if (error) {
+        throw new Error(error.message);
+      }
+      
+      // User will be cleared by the auth state listener
+      toast({
+        title: "Logged out",
+        description: "You have been successfully logged out.",
+      });
+    } catch (error) {
+      toast({
+        title: "Logout failed",
+        description: error instanceof Error ? error.message : "An unknown error occurred",
+        variant: "destructive",
+      });
     } finally {
       setIsLoading(false);
     }
   };
 
   const forgotPassword = async (email: string) => {
-    // This would be replaced with an actual API call
-    console.log(`Password reset requested for ${email}`);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      
+      if (error) {
+        throw new Error(error.message);
+      }
+      
+      toast({
+        title: "Password reset email sent",
+        description: "Check your email for a link to reset your password.",
+      });
+    } catch (error) {
+      toast({
+        title: "Password reset failed",
+        description: error instanceof Error ? error.message : "An unknown error occurred",
+        variant: "destructive",
+      });
+      throw error;
+    }
   };
 
   const resetPassword = async (token: string, password: string) => {
-    // This would be replaced with an actual API call
-    console.log(`Resetting password with token ${token}`);
+    try {
+      const { error } = await supabase.auth.updateUser({
+        password,
+      });
+      
+      if (error) {
+        throw new Error(error.message);
+      }
+      
+      toast({
+        title: "Password reset successful",
+        description: "Your password has been updated successfully.",
+      });
+    } catch (error) {
+      toast({
+        title: "Password reset failed",
+        description: error instanceof Error ? error.message : "An unknown error occurred",
+        variant: "destructive",
+      });
+      throw error;
+    }
   };
 
   return (
