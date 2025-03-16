@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { User } from '@/types';
 import { toast } from '@/components/ui/use-toast';
@@ -12,6 +11,7 @@ interface AuthContextType {
   logout: () => Promise<void>;
   forgotPassword: (email: string) => Promise<void>;
   resetPassword: (token: string, password: string) => Promise<void>;
+  signInWithGoogle: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -289,6 +289,41 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     }
   };
 
+  const signInWithGoogle = async () => {
+    try {
+      setIsLoading(true);
+      
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/process`,
+        },
+      });
+      
+      if (error) {
+        throw new Error(error.message);
+      }
+      
+      if (!data) {
+        throw new Error('Login with Google failed: No data returned');
+      }
+      
+      toast({
+        title: "Redirecting to Google",
+        description: "You'll be redirected to Google to sign in.",
+      });
+    } catch (error) {
+      toast({
+        title: "Google login failed",
+        description: error instanceof Error ? error.message : "An unknown error occurred",
+        variant: "destructive",
+      });
+      throw error;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -299,6 +334,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         logout,
         forgotPassword,
         resetPassword,
+        signInWithGoogle,
       }}
     >
       {children}
