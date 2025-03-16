@@ -94,13 +94,16 @@ export default function Document() {
     return () => clearTimeout(timeout);
   }, [isLoading, document]);
 
-  // Add logging to check document object structure
+  // Add more detailed logging to check document object structure
   React.useEffect(() => {
     if (document) {
-      console.log("Document details:", {
+      console.log("Document details for view:", {
         id: document.id,
+        name: document.name,
+        original_url: document.original_url,
         url: document.url,
-        original_url: document.original_url
+        status: document.status,
+        thumbnails: document.thumbnails?.length || 0
       });
     }
   }, [document]);

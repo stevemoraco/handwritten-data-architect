@@ -1,3 +1,4 @@
+
 import { v4 as uuidv4 } from "uuid";
 import { supabase } from "@/integrations/supabase/client";
 import { Document, DocumentData, ProcessingLog, UploadProgress } from "@/types";
@@ -90,16 +91,17 @@ export async function uploadDocument(
       });
     }
 
-    // Use a consistent path strategy that works across both upload and retrieval
-    // Format: userId/documentId/originalFilename
-    const uploadPath = `${userId}/${id}/${encodeURIComponent(filename)}`;
+    // Use a consistent path for all uploads
+    // Format: userId/uploads/filename
+    const uploadPath = `${userId}/uploads/${encodeURIComponent(filename)}`;
     
     console.log(`Uploading file to path: ${uploadPath}`);
       
     const { error: uploadError } = await supabase.storage
       .from("document_files")
       .upload(uploadPath, file, {
-        cacheControl: "3600"
+        cacheControl: "3600",
+        upsert: true
       });
 
     if (uploadError) {

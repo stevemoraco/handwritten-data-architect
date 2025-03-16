@@ -25,15 +25,18 @@ export function DocumentDetail({ document, onProcess, logs = [] }: DocumentDetai
       setIsCheckingFile(true);
       
       // Extract the URL to use - logging it to help debug
-      console.log("Document original_url:", document.original_url);
-      console.log("Document url:", document.url);
+      console.log("Document details:", {
+        id: document.id,
+        original_url: document.original_url,
+        url: document.url
+      });
       
-      // Try to find a working URL - prioritize original_url
+      // Try to find a working URL - always use original_url first
       let documentUrl = document.original_url;
       
-      // Check if the URL is properly formatted - if not, fall back to url
-      if (!documentUrl || !documentUrl.includes('document_files')) {
-        console.log("Using document.url as fallback");
+      // Check if the URL is available and properly formatted
+      if (!documentUrl) {
+        console.log("No original_url available, using url as fallback");
         documentUrl = document.url;
       }
       

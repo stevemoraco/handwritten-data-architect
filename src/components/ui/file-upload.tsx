@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Progress } from '@/components/ui/progress';
@@ -11,6 +12,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocumentProxy } from 'pdfjs-dist/types/src/display/api';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from '@/context/AuthContext';
 
 const pdfBaseUrl = 'https://mozilla.github.io/pdf.js/web/viewer.html?file=';
 
@@ -55,22 +57,20 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
   const [files, setFiles] = useState<File[]>([]);
   const [filePreviews, setFilePreviews] = useState<FilePreview[]>([]);
   const { uploads, isUploading, addUpload, updateUploadProgress, updateUploadStatus, updatePageProgress } = useUpload();
-  const [userId, setUserId] = useState<string | null>(null);
+  const { user } = useAuth();
   const { toast } = useToast();
   
-  useEffect(() => {
-    const fetchUserId = async () => {
-      const { data } = await supabase.auth.getUser();
-      if (data?.user) {
-        setUserId(data.user.id);
-      }
-    };
-    
-    fetchUserId();
-  }, []);
-
   const onDrop = useCallback(
     (acceptedFiles: File[]) => {
+      if (!user) {
+        toast({
+          title: "Authentication required",
+          description: "You must be logged in to upload files",
+          variant: "destructive"
+        });
+        return;
+      }
+      
       const newFiles = acceptedFiles.filter(
         (file) => !files.some((f) => f.name === file.name && f.size === file.size)
       );
@@ -85,10 +85,20 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
         }
       }
     },
-    [files, onFilesUploaded]
+    [files, onFilesUploaded, user, toast]
   );
 
   const generateFilePreviews = async (file: File) => {
+    if (!user) {
+      console.error("Cannot generate previews: User not authenticated");
+      toast({
+        title: "Authentication required",
+        description: "You must be logged in to upload files",
+        variant: "destructive"
+      });
+      return;
+    }
+    
     const newPreview: FilePreview = {
       file,
       pages: [],
@@ -296,7 +306,7 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
   };
 
   const uploadPageImagesToStorage = async (documentId: string, preview: FilePreview): Promise<string[]> => {
-    if (!userId) throw new Error('User not authenticated');
+    if (!user) throw new Error('User not authenticated');
     
     const imageUrls: string[] = [];
     
@@ -304,7 +314,7 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
       const page = preview.pages[i];
       if (!page.imageBlob) continue;
       
-      const filePath = `${userId}/${documentId}/pages/page-${page.pageNumber}.jpg`;
+      const filePath = `${user.id}/${documentId}/pages/page-${page.pageNumber}.jpg`;
       
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('document_files')
@@ -331,10 +341,13 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
   };
 
   const uploadOriginalFile = async (file: File): Promise<string> => {
-    if (!userId) throw new Error('User not authenticated');
+    if (!user) throw new Error('User not authenticated');
     
-    const tempId = Math.random().toString(36).substring(2, 15);
-    const filePath = `${userId}/temp/${tempId}/${file.name}`;
+    const fileName = encodeURIComponent(file.name);
+    // Use a fixed, consistent path format
+    const filePath = `${user.id}/uploads/${fileName}`;
+    
+    console.log(`Uploading file to path: ${filePath}`);
     
     toast({
       title: "Uploading file...",
@@ -345,7 +358,8 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
       .from('document_files')
       .upload(filePath, file, {
         contentType: file.type,
-        cacheControl: '3600'
+        cacheControl: '3600',
+        upsert: true
       });
     
     if (uploadError) {
@@ -370,6 +384,8 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
       });
       throw new Error('Failed to get public URL for uploaded file');
     }
+    
+    console.log("File uploaded successfully, URL:", urlData.publicUrl);
     
     toast({
       title: "Upload complete",
@@ -407,7 +423,7 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
     accept,
     maxFiles,
     maxSize,
-    disabled: disabled || isUploading,
+    disabled: disabled || isUploading || !user,
   });
 
   useImperativeHandle(ref, () => ({
@@ -426,7 +442,7 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
             'border-destructive/50 bg-destructive/5': isDragReject,
             'border-muted-foreground/20 hover:border-muted-foreground/30 hover:bg-muted/30':
               !isDragActive && !isDragReject && !disabled,
-            'border-muted-foreground/10 bg-muted/10 cursor-not-allowed opacity-60': disabled || isUploading,
+            'border-muted-foreground/10 bg-muted/10 cursor-not-allowed opacity-60': disabled || isUploading || !user,
           }
         )}
       >
@@ -434,13 +450,14 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
         <div className="flex flex-col items-center justify-center space-y-2">
           <div className="space-y-1">
             <p className="text-sm font-medium">
-              {isDragActive ? "Drop the files here" : "Drag & drop files here"}
+              {!user ? "Please log in to upload files" : 
+               isDragActive ? "Drop the files here" : "Drag & drop files here"}
             </p>
             <p className="text-xs text-muted-foreground">
-              or click to browse (PDF, JPG, PNG, GIF)
+              {user ? "or click to browse (PDF, JPG, PNG, GIF)" : "Login required for file upload"}
             </p>
           </div>
-          {!disabled && !isUploading && (
+          {!disabled && !isUploading && user && (
             <Button type="button" variant="outline" size="sm">
               Select Files
             </Button>
@@ -450,7 +467,7 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
               Uploading files...
             </p>
           )}
-          {maxFiles && (
+          {maxFiles && user && (
             <p className="text-xs text-muted-foreground">
               Upload up to {maxFiles} files (max {maxSize / 1048576}MB each)
             </p>
@@ -514,7 +531,7 @@ export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
                           <AlertCircleIcon className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
                           <p className="text-xs text-muted-foreground">Failed to generate preview</p>
                           <p className="text-xs text-destructive mt-1">{preview.error}</p>
-                          {!preview.storageUrl && (
+                          {!preview.storageUrl && user && (
                             <Button 
                               variant="outline" 
                               size="sm" 
