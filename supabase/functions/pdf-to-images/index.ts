@@ -169,32 +169,9 @@ serve(async (req) => {
         console.error("Error in storage download:", error);
       }
       
-      // Second try: with decoded path
+      // If we couldn't get the PDF from storage, try fetching it directly
       if (!pdfBuffer) {
         try {
-          const decodedPath = `${userId}/${documentId}/${decodedFileName}`;
-          console.log(`Trying with decoded path: ${decodedPath}`);
-          
-          const { data: fileData, error: downloadError } = await supabase
-            .storage
-            .from(bucketName)
-            .download(decodedPath);
-          
-          if (!downloadError && fileData) {
-            pdfBuffer = await fileData.arrayBuffer();
-            console.log(`Successfully downloaded file with decoded path (${pdfBuffer.byteLength} bytes)`);
-          } else {
-            console.error(`Decoded path download failed: ${downloadError?.message}`);
-          }
-        } catch (error) {
-          console.error("Error in decoded path download:", error);
-        }
-      }
-      
-      // Third try: direct URL fetch
-      if (!pdfBuffer) {
-        try {
-          // Try with the original URL
           console.log(`Trying direct fetch from URL: ${document.original_url}`);
           
           const pdfResponse = await fetch(document.original_url, {
@@ -209,61 +186,9 @@ serve(async (req) => {
             console.log(`Successfully fetched PDF directly (${pdfBuffer.byteLength} bytes)`);
           } else {
             console.error(`Direct URL fetch failed: ${pdfResponse.status} ${pdfResponse.statusText}`);
-            
-            // Try with decoded URL
-            const decodedUrl = decodeURIComponent(document.original_url);
-            console.log(`Trying with decoded URL: ${decodedUrl}`);
-            
-            const decodedResponse = await fetch(decodedUrl, {
-              headers: {
-                'Accept': 'application/pdf',
-                'Cache-Control': 'no-cache'
-              }
-            });
-            
-            if (decodedResponse.ok) {
-              pdfBuffer = await decodedResponse.arrayBuffer();
-              console.log(`Successfully fetched PDF with decoded URL (${pdfBuffer.byteLength} bytes)`);
-            } else {
-              console.error(`Decoded URL fetch failed: ${decodedResponse.status} ${decodedResponse.statusText}`);
-            }
           }
         } catch (error) {
           console.error("Error in direct URL fetch:", error);
-        }
-      }
-      
-      // Final try: Create a new signed URL and try that
-      if (!pdfBuffer) {
-        try {
-          console.log("Creating signed URL as last resort");
-          
-          const { data: signedUrlData, error: signedUrlError } = await supabase
-            .storage
-            .from(bucketName)
-            .createSignedUrl(filePath, 60); // 60 seconds expiry
-          
-          if (!signedUrlError && signedUrlData?.signedUrl) {
-            console.log(`Trying with signed URL: ${signedUrlData.signedUrl}`);
-            
-            const signedResponse = await fetch(signedUrlData.signedUrl, {
-              headers: {
-                'Accept': 'application/pdf',
-                'Cache-Control': 'no-cache'
-              }
-            });
-            
-            if (signedResponse.ok) {
-              pdfBuffer = await signedResponse.arrayBuffer();
-              console.log(`Successfully fetched PDF with signed URL (${pdfBuffer.byteLength} bytes)`);
-            } else {
-              console.error(`Signed URL fetch failed: ${signedResponse.status} ${signedResponse.statusText}`);
-            }
-          } else {
-            console.error(`Failed to create signed URL: ${signedUrlError?.message}`);
-          }
-        } catch (error) {
-          console.error("Error in signed URL fetch:", error);
         }
       }
       
@@ -272,44 +197,16 @@ serve(async (req) => {
         throw new Error(`Failed to fetch PDF after multiple attempts: ${fetchError?.message || 'Unknown error'}`);
       }
       
-      // Re-upload the file to storage to ensure it's accessible
-      try {
-        const { error: uploadError } = await supabase
-          .storage
-          .from(bucketName)
-          .upload(filePath, pdfBuffer, {
-            contentType: 'application/pdf',
-            upsert: true
-          });
-        
-        if (uploadError) {
-          console.error("Failed to re-upload PDF to storage:", uploadError);
-        } else {
-          console.log(`Re-uploaded PDF to storage path: ${filePath}`);
-          
-          // Update the document URL with the freshly uploaded file
-          const { data: publicUrlData } = supabase.storage
-            .from(bucketName)
-            .getPublicUrl(filePath);
-            
-          if (publicUrlData?.publicUrl) {
-            await supabase
-              .from('documents')
-              .update({ original_url: publicUrlData.publicUrl })
-              .eq('id', documentId);
-              
-            console.log(`Updated document URL to: ${publicUrlData.publicUrl}`);
-          }
-        }
-      } catch (uploadError) {
-        console.error("Error during re-upload:", uploadError);
-      }
-
-      // More accurate page count estimation based on file size
-      // PDF average size per page is around 100KB, but it can vary widely
-      // This is still an estimate that will be more accurate than the previous one
-      const estimatedPageCount = Math.max(1, Math.round(pdfBuffer.byteLength / 75000));
-      console.log(`Estimated ${estimatedPageCount} pages based on file size (${pdfBuffer.byteLength} bytes)`);
+      // More accurate page count estimation based on PDF structure
+      // This is a heuristic method that's more accurate than file size
+      // In a real system, you'd use a proper PDF parser library
+      const pdfText = new TextDecoder().decode(pdfBuffer);
+      
+      // Count the number of "/Page" objects in the PDF
+      const pageMatches = pdfText.match(/\/Type\s*\/Page\b/g);
+      const estimatedPageCount = pageMatches ? pageMatches.length : 1;
+      
+      console.log(`Estimated ${estimatedPageCount} pages based on PDF structure`);
 
       // Clear existing pages for this document
       await supabase
@@ -317,11 +214,9 @@ serve(async (req) => {
         .delete()
         .eq('document_id', documentId);
       
-      // Create document pages with actual thumbnails (using placeholder as fallback)
+      // Create document pages with placeholder thumbnails
+      // In a real implementation, we'd use a PDF to image conversion service
       const thumbnails = [];
-      
-      // Base thumbnail URL for PDFs (if we had a real PDF to image conversion service)
-      const thumbnailBase = `https://placehold.co/800x1100/f5f5f5/333333?text=Page+`;
       
       for (let i = 0; i < estimatedPageCount; i++) {
         // Update progress in the document record
@@ -333,12 +228,19 @@ serve(async (req) => {
           })
           .eq('id', documentId);
         
-        // Create thumbnail URL - in a real implementation, this would be the actual extracted page
+        // Create thumbnail URL - in this implementation, we'll use placeholder images
+        // but in a real system you'd generate actual thumbnails
         const pageNumber = i + 1;
-        const thumbnailUrl = `${thumbnailBase}${pageNumber}`;
         
-        // Add sample text content for the page (this would normally come from OCR)
-        const textContent = `Sample text content for page ${pageNumber} of document ${document.name}.`;
+        // Extract a portion of text for this page
+        const pageSize = Math.floor(pdfText.length / estimatedPageCount);
+        const startIdx = i * pageSize;
+        const endIdx = startIdx + pageSize;
+        const pageText = pdfText.substring(startIdx, endIdx);
+        
+        // Generate a more realistic page preview using a placeholder service
+        // In a real implementation, you would render the PDF page to an image
+        const thumbnailUrl = `https://placehold.co/800x1100/f5f5f5/333333?text=Page+${pageNumber}`;
         
         // Store page info in database
         const { data: pageData, error: pageError } = await supabase
@@ -347,7 +249,7 @@ serve(async (req) => {
             document_id: documentId,
             page_number: pageNumber,
             image_url: thumbnailUrl,
-            text_content: textContent
+            text_content: pageText.substring(0, 1000) // Limit text to avoid database size issues
           })
           .select()
           .single();
@@ -361,6 +263,15 @@ serve(async (req) => {
         console.log(`Processed page ${pageNumber} of ${estimatedPageCount}`);
       }
 
+      // Extract text content from the PDF for transcription
+      // In a real system, you'd use OCR or PDF text extraction
+      // For this example, we'll use a basic extraction based on the PDF content
+      const textContent = pdfText
+        .replace(/^\s*\d+\s*$/gm, '') // Remove page numbers
+        .replace(/[\r\n]+/g, '\n')    // Normalize line endings
+        .replace(/[^\x20-\x7E\n]/g, '') // Keep only printable ASCII and newlines
+        .trim();
+
       // Update document with page count and status
       await supabase
         .from('documents')
@@ -368,9 +279,7 @@ serve(async (req) => {
           status: 'processed',
           page_count: estimatedPageCount,
           processing_progress: 100,
-          original_url: document.original_url, // Ensure the URL is preserved
-          // Add a sample transcription for the document
-          transcription: `This is a sample transcription for the document "${document.name}" with ${estimatedPageCount} pages.`
+          transcription: textContent
         })
         .eq('id', documentId);
 

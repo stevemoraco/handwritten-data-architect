@@ -1,3 +1,4 @@
+
 import * as React from "react";
 import { FileUpload } from "@/components/ui/file-upload";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,7 +7,16 @@ import { useUpload } from "@/context/UploadContext";
 import { useAuth } from "@/context/AuthContext";
 import { useDocuments } from "@/context/DocumentContext";
 import { toast } from "@/components/ui/use-toast";
-import { ArrowRight, FileText, Shield, AlertTriangle, RefreshCw, ExternalLink, Upload, CheckSquare } from "lucide-react";
+import { 
+  ArrowRight, 
+  FileText, 
+  Shield, 
+  AlertTriangle, 
+  RefreshCw, 
+  ExternalLink, 
+  Upload, 
+  CheckSquare 
+} from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
@@ -16,7 +26,6 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { DocumentSelector } from "./DocumentSelector";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { checkDuplicateDocument } from "@/services/geminiService";
 
 interface DocumentUploadProps {
   onDocumentsUploaded?: (documentIds: string[]) => void;
@@ -69,25 +78,28 @@ export function DocumentUpload({
     try {
       const newDocumentIds = await Promise.all(
         files.map(async (file) => {
-          const isDuplicate = await checkDuplicateDocument(file.name, file.size, user.id);
+          // Check for duplicates before uploading
+          const { data: existingDocs, error: queryError } = await supabase
+            .from("documents")
+            .select("id, name, size")
+            .eq("user_id", user.id)
+            .eq("name", file.name);
           
-          if (isDuplicate) {
-            toast({
-              title: "Duplicate document detected",
-              description: `${file.name} appears to be a duplicate of an existing document.`,
-              variant: "default", // Changed from "warning" to "default"
-            });
+          if (!queryError && existingDocs && existingDocs.length > 0) {
+            // Check if size matches too for extra verification
+            const potentialDuplicate = existingDocs.find(doc => 
+              doc.size === file.size || Math.abs(doc.size - file.size) < 100 // Allow small difference in size
+            );
             
-            const { data: existingDoc } = await supabase
-              .from('documents')
-              .select('id')
-              .eq('name', file.name)
-              .eq('size', file.size)
-              .eq('user_id', user.id)
-              .eq('status', 'processed')
-              .single();
+            if (potentialDuplicate) {
+              toast({
+                title: "Duplicate document detected",
+                description: `${file.name} already exists in your documents.`,
+                variant: "default"
+              });
               
-            return existingDoc?.id;
+              return potentialDuplicate.id;
+            }
           }
           
           const uploadId = addUpload(file.name);
@@ -212,23 +224,40 @@ export function DocumentUpload({
               updateUploadStatus(uploadId, 'processing');
               setIsProcessing(true);
               
-              const estimatedPageCount = Math.max(1, Math.ceil(file.size / 100000));
-              updatePageProgress(uploadId, 0, estimatedPageCount);
-              
-              const { data: processingResult, error: processingError } = await supabase.functions
-                .invoke('pdf-to-images', {
-                  body: { documentId: document.id, userId: user.id }
+              // For PDFs, run the pdf-to-images process
+              if (file.type.includes('pdf')) {
+                const { data: processingResult, error: processingError } = await supabase.functions
+                  .invoke('pdf-to-images', {
+                    body: { documentId: document.id, userId: user.id }
+                  });
+                
+                if (processingError) {
+                  console.error("Processing error from edge function:", processingError);
+                  throw new Error(`Document processing failed: ${processingError.message}`);
+                }
+                
+                console.log('Processing result:', processingResult);
+                
+                if (processingResult && processingResult.pageCount) {
+                  updatePageProgress(uploadId, processingResult.pageCount, processingResult.pageCount);
+                }
+              } else {
+                // For non-PDF files, mark as processed directly
+                await supabase
+                  .from('documents')
+                  .update({
+                    status: 'processed',
+                    page_count: 1
+                  })
+                  .eq('id', document.id);
+                
+                // Create a single page record for images
+                await supabase.from('document_pages').insert({
+                  document_id: document.id,
+                  page_number: 1,
+                  image_url: publicURL.publicUrl,
+                  text_content: ""
                 });
-              
-              if (processingError) {
-                console.error("Processing error from edge function:", processingError);
-                throw new Error(`Document processing failed: ${processingError.message}`);
-              }
-              
-              console.log('Processing result:', processingResult);
-              
-              if (processingResult && processingResult.pageCount) {
-                updatePageProgress(uploadId, processingResult.pageCount, processingResult.pageCount);
               }
               
               updateUploadStatus(uploadId, 'complete');

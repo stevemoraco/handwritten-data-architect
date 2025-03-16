@@ -5,10 +5,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Clock, FileText, Images, List } from "lucide-react";
+import { Clock, Download, FileText, Images, List, RotateCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useDocuments } from "@/context/DocumentContext";
 import { toast } from "@/components/ui/use-toast";
+import { getProcessingLogs } from "@/services/documentService";
 
 interface DocumentDetailProps {
   document: Document;
@@ -16,18 +17,38 @@ interface DocumentDetailProps {
 }
 
 export function DocumentDetail({ document, logs }: DocumentDetailProps) {
-  const { processDocumentText } = useDocuments();
-  const [isTranscribing, setIsTranscribing] = React.useState(false);
+  const { processDocumentText, convertPdfToImages } = useDocuments();
+  const [isProcessing, setIsProcessing] = React.useState(false);
+  const [processingLogs, setProcessingLogs] = React.useState<ProcessingLog[]>(logs || []);
+  const [activeTab, setActiveTab] = React.useState("preview");
+
+  React.useEffect(() => {
+    if (logs) {
+      setProcessingLogs(logs);
+    } else {
+      fetchLogs();
+    }
+  }, [document.id]);
+
+  const fetchLogs = async () => {
+    try {
+      const logs = await getProcessingLogs(document.id);
+      setProcessingLogs(logs);
+    } catch (error) {
+      console.error("Error fetching logs:", error);
+    }
+  };
 
   const handleTranscribe = async () => {
     if (!document.transcription) {
-      setIsTranscribing(true);
+      setIsProcessing(true);
       try {
         await processDocumentText(document.id);
         toast({
           title: "Transcription complete",
           description: "Document has been transcribed successfully.",
         });
+        await fetchLogs();
       } catch (error) {
         toast({
           title: "Transcription failed",
@@ -35,8 +56,40 @@ export function DocumentDetail({ document, logs }: DocumentDetailProps) {
           variant: "destructive",
         });
       } finally {
-        setIsTranscribing(false);
+        setIsProcessing(false);
       }
+    }
+  };
+
+  const handleReprocess = async () => {
+    setIsProcessing(true);
+    try {
+      await convertPdfToImages(document.id);
+      toast({
+        title: "Processing started",
+        description: "Document is being reprocessed. This may take a moment.",
+      });
+      await fetchLogs();
+    } catch (error) {
+      toast({
+        title: "Processing failed",
+        description: error instanceof Error ? error.message : "An error occurred",
+        variant: "destructive",
+      });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleDownloadOriginal = () => {
+    if (document.url) {
+      window.open(document.url, '_blank');
+    } else {
+      toast({
+        title: "Download failed",
+        description: "Original document URL is not available",
+        variant: "destructive",
+      });
     }
   };
 
@@ -45,19 +98,57 @@ export function DocumentDetail({ document, logs }: DocumentDetailProps) {
       <CardHeader className="pb-2">
         <CardTitle className="text-xl flex items-center justify-between">
           <span>Document Details</span>
-          {!document.transcription && (
+          <div className="flex gap-2">
+            {document.type === "pdf" && (
+              <Button
+                variant="outline"
+                onClick={handleReprocess}
+                disabled={isProcessing}
+                className="gap-1"
+              >
+                <RotateCw className="h-4 w-4" />
+                Reprocess
+              </Button>
+            )}
+            {!document.transcription && (
+              <Button
+                onClick={handleTranscribe}
+                disabled={isProcessing}
+                className="gap-1"
+              >
+                <FileText className="h-4 w-4" />
+                {isProcessing ? "Processing..." : "Generate Transcription"}
+              </Button>
+            )}
             <Button
-              onClick={handleTranscribe}
-              disabled={isTranscribing}
-              className="ml-auto"
+              variant="outline"
+              onClick={handleDownloadOriginal}
+              className="gap-1"
             >
-              {isTranscribing ? "Transcribing..." : "Generate Transcription"}
+              <Download className="h-4 w-4" />
+              Download
             </Button>
-          )}
+          </div>
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <Tabs defaultValue="preview">
+        <div className="mb-4 flex flex-wrap gap-2">
+          <Badge variant="outline">{document.type.toUpperCase()}</Badge>
+          <Badge 
+            variant={
+              document.status === "processed" ? "default" :
+              document.status === "processing" ? "secondary" :
+              document.status === "failed" ? "destructive" : "outline"
+            }
+          >
+            {document.status.charAt(0).toUpperCase() + document.status.slice(1)}
+          </Badge>
+          {document.pageCount > 0 && (
+            <Badge variant="outline">{document.pageCount} pages</Badge>
+          )}
+        </div>
+        
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="grid grid-cols-3 mb-4">
             <TabsTrigger value="preview">
               <Images className="h-4 w-4 mr-2" />
@@ -85,6 +176,10 @@ export function DocumentDetail({ document, logs }: DocumentDetailProps) {
                       src={url}
                       alt={`Page ${index + 1}`}
                       className="h-full w-full object-cover"
+                      onError={(e) => {
+                        // Fallback for broken images
+                        (e.target as HTMLImageElement).src = `https://placehold.co/800x1100/f5f5f5/333333?text=Page+${index + 1}`;
+                      }}
                     />
                     <div className="absolute top-2 right-2">
                       <Badge>Page {index + 1}</Badge>
@@ -95,7 +190,13 @@ export function DocumentDetail({ document, logs }: DocumentDetailProps) {
             ) : (
               <div className="py-12 text-center bg-muted/20 rounded-md">
                 <p className="text-muted-foreground">
-                  No preview images available. Please convert the document first.
+                  {document.status === "processing" ? (
+                    "Document is currently being processed. Please wait..."
+                  ) : document.status === "failed" ? (
+                    "Processing failed. Please try reprocessing the document."
+                  ) : (
+                    "No preview images available. Please convert the document first."
+                  )}
                 </p>
               </div>
             )}
@@ -113,7 +214,11 @@ export function DocumentDetail({ document, logs }: DocumentDetailProps) {
             ) : (
               <div className="py-12 text-center bg-muted/20 rounded-md">
                 <p className="text-muted-foreground">
-                  No transcription available. Please generate a transcription first.
+                  {isProcessing ? (
+                    "Generating transcription... Please wait."
+                  ) : (
+                    "No transcription available. Please generate a transcription first."
+                  )}
                 </p>
               </div>
             )}
@@ -122,9 +227,9 @@ export function DocumentDetail({ document, logs }: DocumentDetailProps) {
           <TabsContent value="logs" className="mt-0">
             <div className="bg-muted/20 rounded-md mt-4">
               <ScrollArea className="h-[500px] w-full">
-                {logs.length > 0 ? (
+                {processingLogs.length > 0 ? (
                   <div className="space-y-3 p-4">
-                    {logs.filter(log => log.documentId === document.id).map((log) => (
+                    {processingLogs.map((log) => (
                       <div
                         key={log.id}
                         className="flex items-start gap-3 p-3 rounded-md bg-background"

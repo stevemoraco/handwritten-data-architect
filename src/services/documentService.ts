@@ -1,3 +1,4 @@
+
 import { v4 as uuidv4 } from "uuid";
 import { supabase } from "@/integrations/supabase/client";
 import { Document, DocumentData, ProcessingLog, UploadProgress } from "@/types";
@@ -304,6 +305,35 @@ export async function getDocumentPages(documentId: string): Promise<any[]> {
   }
 }
 
+export async function getProcessingLogs(documentId: string): Promise<ProcessingLog[]> {
+  if (!documentId) return [];
+
+  try {
+    const { data, error } = await supabase
+      .from("processing_logs")
+      .select("*")
+      .eq("document_id", documentId)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Error fetching processing logs:", error.message);
+      return [];
+    }
+
+    return (data || []).map(log => ({
+      id: log.id,
+      documentId: log.document_id,
+      action: log.action,
+      status: log.status as "success" | "error" | "warning",
+      message: log.message || "",
+      timestamp: log.created_at
+    }));
+  } catch (error) {
+    console.error("Error in getProcessingLogs:", error);
+    return [];
+  }
+}
+
 export async function transcribeDocument(documentId: string): Promise<string | null> {
   if (!documentId) return null;
 
@@ -430,26 +460,33 @@ export async function extractDocumentData(documentId: string, schemaId: string):
   }
 }
 
-export function extractTableData(documentId: string): Record<string, Record<string, string>> {
-  // This is a mock function that will later be replaced by actual data from the database
-  return {
-    "Document Information": {
-      "document_id": "DOC-12345",
-      "document_name": "Sample Invoice",
-      "upload_date": "2023-06-15",
-      "page_count": "3"
-    },
-    "Invoice Details": {
-      "invoice_number": "INV-001",
-      "date": "2023-06-01",
-      "due_date": "2023-07-01",
-      "total_amount": "$1,250.00"
-    },
-    "Customer Information": {
-      "name": "Acme Corporation",
-      "contact": "John Doe",
-      "email": "john@acmecorp.com",
-      "phone": "(555) 123-4567"
+export function getExtractedData(documentId: string): Promise<DocumentData[]> {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const { data, error } = await supabase
+        .from("document_data")
+        .select("*")
+        .eq("document_id", documentId);
+        
+      if (error) {
+        console.error("Error fetching document data:", error);
+        throw error;
+      }
+      
+      const formattedData: DocumentData[] = (data || []).map(item => ({
+        id: item.id,
+        documentId: item.document_id,
+        tableId: item.table_id,
+        fieldId: item.field_id,
+        value: item.value || "",
+        confidence: item.confidence || 0,
+        createdAt: item.created_at
+      }));
+      
+      resolve(formattedData);
+    } catch (error) {
+      console.error("Error in getExtractedData:", error);
+      reject(error);
     }
-  };
+  });
 }
