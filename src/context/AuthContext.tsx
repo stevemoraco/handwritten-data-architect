@@ -184,8 +184,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         const messageHandler = (event: MessageEvent) => {
           if (
             event.origin === window.location.origin && 
-            (event.data?.type === 'SUPABASE_AUTH_CALLBACK' || 
-             event.data?.type === 'SUPABASE_AUTH_COMPLETE')
+            event.data?.type === 'SUPABASE_AUTH_CALLBACK'
           ) {
             console.log('Auth message received:', event.data);
             window.removeEventListener('message', messageHandler);
@@ -200,6 +199,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
             } else {
               resolve();
             }
+            
+            // Clear any timeout
+            if (timeoutId) {
+              clearTimeout(timeoutId);
+            }
           }
         };
         
@@ -212,8 +216,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
             popup.close();
           }
           
+          toast({
+            title: 'Authentication timed out',
+            description: 'The authentication process took too long. Please try again.',
+            variant: 'destructive',
+          });
+          
           reject(new Error('Authentication timed out'));
-        }, 120000);
+        }, 120000); // 2 minutes timeout
       } catch (error: any) {
         toast({
           title: 'Google sign in failed',
