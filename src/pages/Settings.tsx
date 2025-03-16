@@ -15,13 +15,15 @@ import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/components/ui/use-toast";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { User } from "@supabase/supabase-js";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { UsersIcon } from "lucide-react";
 
 export default function Settings() {
   const { user, signOut } = useAuth();
   const { toast } = useToast();
   const [name, setName] = React.useState("");
   const [email, setEmail] = React.useState("");
+  const [activeTab, setActiveTab] = React.useState("profile");
   const [notifications, setNotifications] = React.useState({
     email: true,
     marketing: false,
@@ -39,6 +41,7 @@ export default function Settings() {
       setEmail(user.email || "");
       
       // Try to extract name from user metadata or email
+      // Using optional chaining to fix TypeScript errors
       const displayName = user.user_metadata?.full_name || 
                          user.user_metadata?.name || 
                          email.split('@')[0];
@@ -93,115 +96,146 @@ export default function Settings() {
     <div className="container py-10">
       <h1 className="text-3xl font-bold mb-6">Settings</h1>
       
-      <div className="grid gap-6">
-        <Card>
-          <CardHeader>
-            <div className="flex items-center space-x-4">
-              <Avatar className="h-12 w-12">
-                <AvatarImage src={avatarUrl} alt={name || "User"} />
-                <AvatarFallback>{name?.substring(0, 2).toUpperCase() || "U"}</AvatarFallback>
-              </Avatar>
-              <div>
-                <CardTitle>Profile Settings</CardTitle>
-                <CardDescription>Manage your account information</CardDescription>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Name</Label>
-              <Input
-                id="name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Your name"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="Your email"
-                disabled
-                className="bg-muted"
-              />
-              <p className="text-xs text-muted-foreground">Your email cannot be changed</p>
-            </div>
-          </CardContent>
-          <CardFooter className="flex justify-between">
-            <Button variant="outline" onClick={handleLogout}>
-              Log out
-            </Button>
-            <Button onClick={handleUpdateProfile}>Save changes</Button>
-          </CardFooter>
-        </Card>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+        <TabsList className="mb-4">
+          <TabsTrigger value="profile">Profile</TabsTrigger>
+          <TabsTrigger value="notifications">Notifications</TabsTrigger>
+          <TabsTrigger value="team">Team</TabsTrigger>
+        </TabsList>
         
-        <Card>
-          <CardHeader>
-            <CardTitle>Notification Preferences</CardTitle>
-            <CardDescription>Configure how you receive notifications</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label htmlFor="email-notifications">Email Notifications</Label>
-                <p className="text-sm text-muted-foreground">
-                  Receive notifications about document processing via email
-                </p>
+        <TabsContent value="profile" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center space-x-4">
+                <Avatar className="h-12 w-12">
+                  <AvatarImage src={avatarUrl} alt={name || "User"} />
+                  <AvatarFallback>{name?.substring(0, 2).toUpperCase() || "U"}</AvatarFallback>
+                </Avatar>
+                <div>
+                  <CardTitle>Profile Settings</CardTitle>
+                  <CardDescription>Manage your account information</CardDescription>
+                </div>
               </div>
-              <Switch
-                id="email-notifications"
-                checked={notifications.email}
-                onCheckedChange={(checked) =>
-                  setNotifications({ ...notifications, email: checked })
-                }
-              />
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label htmlFor="security-notifications">Security Alerts</Label>
-                <p className="text-sm text-muted-foreground">
-                  Get notified about important security events
-                </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="name">Name</Label>
+                <Input
+                  id="name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Your name"
+                />
               </div>
-              <Switch
-                id="security-notifications"
-                checked={notifications.security}
-                onCheckedChange={(checked) =>
-                  setNotifications({ ...notifications, security: checked })
-                }
-              />
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label htmlFor="marketing-notifications">Marketing</Label>
-                <p className="text-sm text-muted-foreground">
-                  Receive updates about new features and product announcements
-                </p>
+              <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="Your email"
+                  disabled
+                  className="bg-muted"
+                />
+                <p className="text-xs text-muted-foreground">Your email cannot be changed</p>
               </div>
-              <Switch
-                id="marketing-notifications"
-                checked={notifications.marketing}
-                onCheckedChange={(checked) =>
-                  setNotifications({ ...notifications, marketing: checked })
-                }
-              />
-            </div>
-          </CardContent>
-          <CardFooter>
-            <Button className="w-full" onClick={() => {
-              toast({
-                title: "Notification preferences saved",
-                description: "Your notification settings have been updated.",
-              });
-            }}>
-              Save preferences
-            </Button>
-          </CardFooter>
-        </Card>
-      </div>
+            </CardContent>
+            <CardFooter className="flex justify-between">
+              <Button variant="outline" onClick={handleLogout}>
+                Log out
+              </Button>
+              <Button onClick={handleUpdateProfile}>Save changes</Button>
+            </CardFooter>
+          </Card>
+        </TabsContent>
+        
+        <TabsContent value="notifications" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Notification Preferences</CardTitle>
+              <CardDescription>Configure how you receive notifications</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label htmlFor="email-notifications">Email Notifications</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Receive notifications about document processing via email
+                  </p>
+                </div>
+                <Switch
+                  id="email-notifications"
+                  checked={notifications.email}
+                  onCheckedChange={(checked) =>
+                    setNotifications({ ...notifications, email: checked })
+                  }
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label htmlFor="security-notifications">Security Alerts</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Get notified about important security events
+                  </p>
+                </div>
+                <Switch
+                  id="security-notifications"
+                  checked={notifications.security}
+                  onCheckedChange={(checked) =>
+                    setNotifications({ ...notifications, security: checked })
+                  }
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label htmlFor="marketing-notifications">Marketing</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Receive updates about new features and product announcements
+                  </p>
+                </div>
+                <Switch
+                  id="marketing-notifications"
+                  checked={notifications.marketing}
+                  onCheckedChange={(checked) =>
+                    setNotifications({ ...notifications, marketing: checked })
+                  }
+                />
+              </div>
+            </CardContent>
+            <CardFooter>
+              <Button className="w-full" onClick={() => {
+                toast({
+                  title: "Notification preferences saved",
+                  description: "Your notification settings have been updated.",
+                });
+              }}>
+                Save preferences
+              </Button>
+            </CardFooter>
+          </Card>
+        </TabsContent>
+        
+        <TabsContent value="team" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Team Management</CardTitle>
+              <CardDescription>Manage team members and permissions</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="text-center py-6">
+                <UsersIcon className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+                <h3 className="text-lg font-medium mb-2">Your Team</h3>
+                <p className="text-muted-foreground mb-6">
+                  You don't have any team members yet. Add team members to collaborate on document processing.
+                </p>
+                <Button>
+                  Invite Team Members
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

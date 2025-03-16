@@ -9,12 +9,18 @@ import { BatchDocumentsSelector } from "@/components/document/BatchDocumentsSele
 
 export default function Documents() {
   const navigate = useNavigate();
-  const { fetchUserDocuments } = useDocuments();
+  const { documents, isLoading } = useDocuments();
   const [selectedDocumentIds, setSelectedDocumentIds] = React.useState<string[]>([]);
 
+  // Using a ref to track if we've already fetched documents
+  const fetchedRef = React.useRef(false);
+
+  // We'll only fetch documents once when the component mounts
   React.useEffect(() => {
-    fetchUserDocuments();
-  }, [fetchUserDocuments]);
+    if (!fetchedRef.current) {
+      fetchedRef.current = true;
+    }
+  }, []);
 
   return (
     <div className="container py-10">

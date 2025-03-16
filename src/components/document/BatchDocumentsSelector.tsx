@@ -1,3 +1,4 @@
+
 import * as React from "react";
 import { Check, FileText, CalendarIcon, Ban, EyeIcon, FileTypeIcon, PlayIcon, TrashIcon, PlusIcon } from "lucide-react";
 import { useDocuments } from "@/context/DocumentContext";
@@ -27,9 +28,15 @@ export function BatchDocumentsSelector({
   const [selectedDocumentIds, setSelectedDocumentIds] = React.useState<string[]>([]);
   const [activeTab, setActiveTab] = React.useState<string>("all");
   const navigate = useNavigate();
+  
+  // Using a ref to prevent duplicate fetches
+  const hasFetchedRef = React.useRef(false);
 
   React.useEffect(() => {
-    fetchUserDocuments();
+    if (!hasFetchedRef.current) {
+      fetchUserDocuments();
+      hasFetchedRef.current = true;
+    }
   }, [fetchUserDocuments]);
 
   React.useEffect(() => {
