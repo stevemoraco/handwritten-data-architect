@@ -1,4 +1,3 @@
-
 import { createContext, useContext, useState, ReactNode, useEffect } from "react";
 import { Document, DocumentSchema, ProcessingLog } from "@/types";
 import { toast } from "@/components/ui/use-toast";
@@ -62,7 +61,7 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         createdAt: doc.created_at,
         updatedAt: doc.updated_at,
         userId: doc.user_id,
-        organizationId: doc.organization_id,
+        organizationId: doc.pipeline_id,
         pipelineId: doc.pipeline_id,
         processing_progress: doc.processing_progress,
         error: doc.processing_error
@@ -102,7 +101,6 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
       const { data, error } = await supabase
         .from("document_schemas")
         .select("*")
-        .eq("organization_id", user.organizationId || '')
         .order("created_at", { ascending: false });
 
       if (error) {
@@ -111,7 +109,18 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
       }
 
       // Transform the database records to match the DocumentSchema type
-      const schemasList: DocumentSchema[] = data || [];
+      const schemasList: DocumentSchema[] = data ? data.map(schema => ({
+        id: schema.id,
+        name: schema.name,
+        structure: schema.structure as any,
+        description: schema.description || "",
+        rationale: schema.rationale || "",
+        suggestions: schema.suggestions as any || [],
+        createdAt: schema.created_at,
+        updatedAt: schema.updated_at,
+        organizationId: schema.organization_id || ""
+      })) : [];
+      
       setSchemas(schemasList);
     } catch (error) {
       console.error("Error fetching schemas:", error);
@@ -232,7 +241,6 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Add the processDocumentText function
   const processDocumentText = async (documentId: string) => {
     if (!user) {
       toast({
