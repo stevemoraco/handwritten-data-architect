@@ -7,7 +7,7 @@ import { useUpload } from "@/context/UploadContext";
 import { useAuth } from "@/context/AuthContext";
 import { useDocuments } from "@/context/DocumentContext";
 import { toast } from "@/components/ui/use-toast";
-import { ArrowRight, FileText, Shield, AlertTriangle, RefreshCw, ExternalLink } from "lucide-react";
+import { ArrowRight, FileText, Shield, AlertTriangle, RefreshCw, ExternalLink, Upload, CheckSquare } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
@@ -15,6 +15,8 @@ import { LoginModal } from "@/components/auth/LoginModal";
 import { Document } from "@/types";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
+import { DocumentSelector } from "./DocumentSelector";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 interface DocumentUploadProps {
   onDocumentsUploaded?: (documentIds: string[]) => void;
@@ -33,9 +35,11 @@ export function DocumentUpload({
   const navigate = useNavigate();
   const [selectedFiles, setSelectedFiles] = React.useState<File[]>([]);
   const [uploadedDocumentIds, setUploadedDocumentIds] = React.useState<string[]>([]);
+  const [selectedExistingDocumentIds, setSelectedExistingDocumentIds] = React.useState<string[]>([]);
   const [showLoginModal, setShowLoginModal] = React.useState(false);
   const [isProcessing, setIsProcessing] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [activeTab, setActiveTab] = React.useState<string>("existing");
 
   React.useEffect(() => {
     if (user) {
@@ -288,11 +292,27 @@ export function DocumentUpload({
     }
   };
 
+  const handleExistingDocumentSelection = (documentIds: string[]) => {
+    setSelectedExistingDocumentIds(documentIds);
+  };
+
   const handleContinue = () => {
-    if (onDocumentsUploaded && uploadedDocumentIds.length > 0) {
-      onDocumentsUploaded(uploadedDocumentIds);
-    } else if (uploadedDocumentIds.length > 0) {
+    // Combine newly uploaded and selected existing documents
+    const allSelectedDocumentIds = [
+      ...uploadedDocumentIds,
+      ...selectedExistingDocumentIds
+    ];
+    
+    if (onDocumentsUploaded && allSelectedDocumentIds.length > 0) {
+      onDocumentsUploaded(allSelectedDocumentIds);
+    } else if (allSelectedDocumentIds.length > 0) {
       navigate(`/process`);
+    } else {
+      toast({
+        title: "No documents selected",
+        description: "Please upload or select at least one document to continue.",
+        variant: "destructive"
+      });
     }
   };
 
@@ -314,6 +334,7 @@ export function DocumentUpload({
 
   const successfulUploads = uploads.filter(upload => upload.status === "complete").length;
   const totalDocuments = documents.length;
+  const totalSelected = uploadedDocumentIds.length + selectedExistingDocumentIds.length;
 
   return (
     <>
@@ -322,11 +343,11 @@ export function DocumentUpload({
           <CardTitle className="flex items-center gap-2 justify-between">
             <div className="flex items-center gap-2">
               <FileText className="h-5 w-5" />
-              Upload Documents
+              Select Documents
             </div>
-            {totalDocuments > 0 && (
-              <Badge variant="outline" className="ml-2">
-                {totalDocuments} document{totalDocuments !== 1 ? 's' : ''}
+            {totalSelected > 0 && (
+              <Badge variant="default" className="ml-2">
+                {totalSelected} selected
               </Badge>
             )}
           </CardTitle>
@@ -359,136 +380,70 @@ export function DocumentUpload({
             </Alert>
           )}
 
-          <FileUpload
-            onFilesUploaded={handleFilesSelected}
-            accept={{ 'application/pdf': ['.pdf'] }}
-            disabled={isUploading || isProcessing}
-          />
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-2">
+            <TabsList className="grid grid-cols-2 mb-4">
+              <TabsTrigger value="existing">
+                <CheckSquare className="h-4 w-4 mr-2" />
+                Select Existing
+              </TabsTrigger>
+              <TabsTrigger value="upload">
+                <Upload className="h-4 w-4 mr-2" />
+                Upload New
+              </TabsTrigger>
+            </TabsList>
+            
+            <TabsContent value="existing">
+              <DocumentSelector
+                onSelectionChange={handleExistingDocumentSelection}
+                showTitle={false}
+                maxSelections={5}
+              />
+            </TabsContent>
+            
+            <TabsContent value="upload">
+              <FileUpload
+                onFilesUploaded={handleFilesSelected}
+                accept={{ 'application/pdf': ['.pdf'] }}
+                disabled={isUploading || isProcessing}
+              />
+              
+              {isProcessing && (
+                <div className="mt-4 text-center py-2 text-sm text-muted-foreground animate-pulse">
+                  Processing documents... This might take a moment.
+                </div>
+              )}
+            </TabsContent>
+          </Tabs>
           
-          {isProcessing && (
-            <div className="mt-4 text-center py-2 text-sm text-muted-foreground animate-pulse">
-              Processing documents... This might take a moment.
-            </div>
-          )}
-          
-          {/* Previously uploaded documents */}
-          {user && documents.length > 0 && (
-            <div className="mt-6">
-              <Separator className="my-4" />
-              <h3 className="text-sm font-medium mb-2 flex justify-between items-center">
-                <span>Your Documents</span>
-                <Badge variant="outline">{documents.length} total</Badge>
-              </h3>
-              <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-                {documents.map((doc) => (
-                  <Card key={doc.id} className="p-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-3 flex-grow min-w-0">
-                        <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded border bg-muted">
-                          {doc.thumbnails && doc.thumbnails.length > 0 ? (
-                            <img 
-                              src={doc.thumbnails[0]} 
-                              alt={doc.name}
-                              className="h-full w-full object-cover"
-                            />
-                          ) : (
-                            <FileText className="h-full w-full p-2 text-muted-foreground" />
-                          )}
-                        </div>
-                        <div className="flex-grow min-w-0">
-                          <p className="text-sm font-medium truncate">{doc.name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {doc.pageCount ? `${doc.pageCount} pages` : 'Uploading...'}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex space-x-2">
-                        {/* Original PDF view button */}
-                        <Button 
-                          variant="outline" 
-                          size="sm"
-                          onClick={() => handleViewOriginalDocument(doc.url)}
-                          title="View original PDF"
-                        >
-                          <ExternalLink className="h-3.5 w-3.5" />
-                        </Button>
-                        
-                        {/* Retry conversion button */}
-                        {(doc.status === "failed" || !doc.thumbnails || doc.thumbnails.length === 0) && (
-                          <Button 
-                            variant="outline" 
-                            size="sm"
-                            onClick={() => handleRetryProcessing(doc.id)}
-                            title="Retry conversion"
-                          >
-                            <RefreshCw className="h-3.5 w-3.5" />
-                          </Button>
-                        )}
-                        
-                        {/* Process text button */}
-                        {doc.thumbnails && doc.thumbnails.length > 0 && (
-                          <Button 
-                            variant="outline" 
-                            size="sm"
-                            onClick={() => handleProcessText(doc.id)}
-                            title="Process document text"
-                          >
-                            <FileText className="h-3.5 w-3.5" />
-                          </Button>
-                        )}
-                        
-                        {/* View details button */}
-                        <Button 
-                          variant="secondary" 
-                          size="sm"
-                          onClick={() => handleViewDocument(doc.id)}
-                        >
-                          View
-                        </Button>
-                      </div>
-                    </div>
-                    
-                    {/* Status indicator */}
-                    {doc.status === "processing" && (
-                      <div className="mt-2">
-                        <div className="flex justify-between text-xs">
-                          <span>Processing...</span>
-                          <span>{Math.round(doc.processing_progress || 0)}%</span>
-                        </div>
-                        <div className="w-full bg-muted rounded-full h-1.5 mt-1">
-                          <div 
-                            className="bg-primary h-1.5 rounded-full transition-all duration-300" 
-                            style={{ width: `${doc.processing_progress || 0}%` }}
-                          ></div>
-                        </div>
-                      </div>
-                    )}
-                    
-                    {/* Error message */}
-                    {doc.status === "failed" && doc.error && (
-                      <p className="mt-2 text-xs text-red-500">{doc.error}</p>
-                    )}
-                  </Card>
-                ))}
-              </div>
-            </div>
-          )}
+          {/* Status summary display */}
+          <div className="mt-4 flex flex-wrap gap-2">
+            {selectedExistingDocumentIds.length > 0 && (
+              <Badge variant="outline" className="bg-primary/10">
+                {selectedExistingDocumentIds.length} existing document{selectedExistingDocumentIds.length !== 1 ? 's' : ''} selected
+              </Badge>
+            )}
+            {uploadedDocumentIds.length > 0 && (
+              <Badge variant="outline" className="bg-primary/10">
+                {uploadedDocumentIds.length} new document{uploadedDocumentIds.length !== 1 ? 's' : ''} uploaded
+              </Badge>
+            )}
+          </div>
         </CardContent>
         
         <CardFooter className="flex justify-between border-t pt-4">
           <div className="text-sm text-muted-foreground">
-            {successfulUploads > 0 ? (
-              <span>{successfulUploads} document{successfulUploads > 1 ? 's' : ''} uploaded</span>
+            {totalSelected > 0 ? (
+              <span>{totalSelected} document{totalSelected !== 1 ? 's' : ''} selected</span>
             ) : totalDocuments > 0 ? (
               <span>{totalDocuments} document{totalDocuments !== 1 ? 's' : ''} available</span>
             ) : (
-              <span>Upload PDF documents to continue</span>
+              <span>Upload or select documents to continue</span>
             )}
           </div>
           
           <Button 
             onClick={handleContinue}
-            disabled={(uploads.length === 0 && documents.length === 0) || isUploading || isProcessing}
+            disabled={totalSelected === 0 || isUploading || isProcessing}
           >
             Continue <ArrowRight className="ml-2 h-4 w-4" />
           </Button>

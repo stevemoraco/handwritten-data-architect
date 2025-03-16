@@ -16,21 +16,24 @@ export const processWithGemini = async (prompt: GeminiPrompt): Promise<string> =
       operation = 'transcribe';
       body = {
         documentId: prompt.documentId,
-        operation
+        operation,
+        model: "gemini-1.5-flash-latest"  // Explicitly specify model
       };
     } else if (prompt.prompt.includes("schema")) {
       operation = 'generateSchema';
       body = {
         documentId: prompt.documentId,
         documentIds: prompt.documentIds || [prompt.documentId],
-        operation
+        operation,
+        model: "gemini-1.5-flash-latest"  // Explicitly specify model
       };
     } else if (prompt.prompt.includes("extract data")) {
       operation = 'extractData';
       body = {
         documentId: prompt.documentId,
         schemaId: prompt.schemaId,
-        operation
+        operation,
+        model: "gemini-1.5-flash-latest"  // Explicitly specify model
       };
     }
     
@@ -39,8 +42,8 @@ export const processWithGemini = async (prompt: GeminiPrompt): Promise<string> =
     // Call the edge function
     const response = await supabase.functions.invoke(endpoint, { body });
     
-    if (!response.data.success) {
-      const errorMessage = response.data.error || `Unknown error in ${operation}`;
+    if (!response.data || !response.data.success) {
+      const errorMessage = response.data?.error || `Unknown error in ${operation}`;
       console.error(`Error in ${operation}:`, errorMessage);
       throw new Error(errorMessage);
     }
