@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Progress } from '@/components/ui/progress';
@@ -9,8 +10,10 @@ import { Badge } from '@/components/ui/badge';
 import { useUpload } from '@/context/UploadContext';
 import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocumentProxy } from 'pdfjs-dist/types/src/display/api';
+import { supabase } from '@/integrations/supabase/client';
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+// Import the PDF.js worker from a CDN or local path that is guaranteed to work
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.js`;
 
 interface FileUploadProps {
   accept?: Record<string, string[]>;
@@ -26,6 +29,7 @@ interface FilePreview {
   pages: {
     pageNumber: number;
     dataUrl: string;
+    imageBlob?: Blob;
   }[];
   pageCount: number;
   isLoading: boolean;
@@ -45,7 +49,20 @@ export function FileUpload({
 }: FileUploadProps) {
   const [files, setFiles] = useState<File[]>([]);
   const [filePreviews, setFilePreviews] = useState<FilePreview[]>([]);
-  const { uploads, isUploading } = useUpload();
+  const { uploads, isUploading, addUpload, updateUploadProgress, updateUploadStatus, updatePageProgress } = useUpload();
+  const [userId, setUserId] = useState<string | null>(null);
+  
+  // Get the current user id once on component mount
+  useEffect(() => {
+    const fetchUserId = async () => {
+      const { data } = await supabase.auth.getUser();
+      if (data?.user) {
+        setUserId(data.user.id);
+      }
+    };
+    
+    fetchUserId();
+  }, []);
 
   const onDrop = useCallback(
     (acceptedFiles: File[]) => {
@@ -98,6 +115,7 @@ export function FileUpload({
     try {
       const fileArrayBuffer = await file.arrayBuffer();
       
+      // Load the PDF using PDF.js
       const pdf = await pdfjsLib.getDocument({ data: fileArrayBuffer }).promise;
       const pageCount = pdf.numPages;
       
@@ -108,17 +126,15 @@ export function FileUpload({
         pagePromises.push(renderPdfPage(pdf, i));
       }
       
-      const pageDataUrls = await Promise.all(pagePromises);
+      const pageDataObjects = await Promise.all(pagePromises);
       
+      // Update the preview with the rendered pages
       setFilePreviews(prev => 
         prev.map(p => 
           p.file === file 
             ? { 
                 ...p, 
-                pages: pageDataUrls.map((dataUrl, index) => ({
-                  pageNumber: index + 1,
-                  dataUrl
-                })),
+                pages: pageDataObjects,
                 pageCount,
                 isLoading: false
               }
@@ -131,7 +147,7 @@ export function FileUpload({
     }
   };
 
-  const renderPdfPage = async (pdf: PDFDocumentProxy, pageNumber: number): Promise<string> => {
+  const renderPdfPage = async (pdf: PDFDocumentProxy, pageNumber: number): Promise<{pageNumber: number, dataUrl: string, imageBlob: Blob}> => {
     try {
       const page = await pdf.getPage(pageNumber);
       const viewport = page.getViewport({ scale: 0.5 });
@@ -151,7 +167,23 @@ export function FileUpload({
         viewport
       }).promise;
       
-      return canvas.toDataURL('image/jpeg', 0.75);
+      // Get the data URL for preview
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
+      
+      // Also create a blob for later uploading
+      return new Promise<{pageNumber: number, dataUrl: string, imageBlob: Blob}>((resolve, reject) => {
+        canvas.toBlob((blob) => {
+          if (blob) {
+            resolve({
+              pageNumber,
+              dataUrl,
+              imageBlob: blob
+            });
+          } else {
+            reject(new Error(`Failed to create blob for page ${pageNumber}`));
+          }
+        }, 'image/jpeg', 0.75);
+      });
     } catch (error) {
       console.error(`Error rendering page ${pageNumber}:`, error);
       throw error;
@@ -166,19 +198,31 @@ export function FileUpload({
         const dataUrl = e.target?.result as string;
         
         if (dataUrl) {
-          setFilePreviews(prev => 
-            prev.map(p => 
-              p.file === file 
-                ? { 
-                    ...p, 
-                    pages: [{ pageNumber: 1, dataUrl }],
-                    pageCount: 1,
-                    isLoading: false
-                  }
-                : p
-            )
-          );
-          resolve();
+          // Create a blob from the data URL for later uploading
+          fetch(dataUrl)
+            .then(res => res.blob())
+            .then(imageBlob => {
+              setFilePreviews(prev => 
+                prev.map(p => 
+                  p.file === file 
+                    ? { 
+                        ...p, 
+                        pages: [{ 
+                          pageNumber: 1, 
+                          dataUrl,
+                          imageBlob 
+                        }],
+                        pageCount: 1,
+                        isLoading: false
+                      }
+                    : p
+                )
+              );
+              resolve();
+            })
+            .catch(err => {
+              reject(new Error('Failed to create blob from image: ' + err.message));
+            });
         } else {
           reject(new Error('Failed to read image file'));
         }
@@ -190,6 +234,49 @@ export function FileUpload({
       
       reader.readAsDataURL(file);
     });
+  };
+
+  // Function to directly upload page images to Supabase Storage
+  const uploadPageImagesToStorage = async (documentId: string, preview: FilePreview): Promise<string[]> => {
+    if (!userId) throw new Error('User not authenticated');
+    
+    const imageUrls: string[] = [];
+    
+    // Upload each page as an image
+    for (let i = 0; i < preview.pages.length; i++) {
+      const page = preview.pages[i];
+      if (!page.imageBlob) continue;
+      
+      const filePath = `${userId}/${documentId}/pages/page-${page.pageNumber}.jpg`;
+      
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('document_files')
+        .upload(filePath, page.imageBlob, {
+          contentType: 'image/jpeg',
+          cacheControl: '3600'
+        });
+      
+      if (uploadError) {
+        console.error(`Error uploading page ${page.pageNumber} image:`, uploadError);
+        throw uploadError;
+      }
+      
+      // Get the public URL
+      const { data: urlData } = supabase.storage
+        .from('document_files')
+        .getPublicUrl(filePath);
+      
+      if (urlData && urlData.publicUrl) {
+        imageUrls.push(urlData.publicUrl);
+      }
+    }
+    
+    return imageUrls;
+  };
+
+  // This function would be called from the DocumentUpload component to upload the preview images
+  const getPreviewsForFile = (file: File): FilePreview | undefined => {
+    return filePreviews.find(preview => preview.file === file);
   };
 
   const removeFile = (fileToRemove: File) => {
@@ -210,6 +297,15 @@ export function FileUpload({
     maxSize,
     disabled: disabled || isUploading,
   });
+
+  // Expose methods to parent components
+  React.useImperativeHandle(
+    React.forwardRef((_, ref) => ref),
+    () => ({
+      getPreviewsForFile,
+      uploadPageImagesToStorage
+    })
+  );
 
   return (
     <div className={cn('space-y-4', className)}>

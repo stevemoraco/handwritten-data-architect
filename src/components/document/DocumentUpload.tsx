@@ -39,7 +39,7 @@ export function DocumentUpload({
 }: DocumentUploadProps) {
   const { isUploading, uploads, addUpload, updateUploadProgress, updateUploadStatus, updatePageProgress } = useUpload();
   const { user } = useAuth();
-  const { documents, isLoading, fetchUserDocuments, convertPdfToImages, processDocumentText } = useDocuments();
+  const { documents, isLoading, fetchUserDocuments } = useDocuments();
   const navigate = useNavigate();
   const [selectedFiles, setSelectedFiles] = React.useState<File[]>([]);
   const [uploadedDocumentIds, setUploadedDocumentIds] = React.useState<string[]>([]);
@@ -48,6 +48,7 @@ export function DocumentUpload({
   const [isProcessing, setIsProcessing] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [activeTab, setActiveTab] = React.useState<string>("existing");
+  const fileUploadRef = React.useRef<any>(null);
 
   React.useEffect(() => {
     if (user) {
@@ -125,6 +126,7 @@ export function DocumentUpload({
           const uploadId = addUpload(file.name);
           
           try {
+            // Create document record first
             const { data: document, error: documentError } = await supabase
               .from('documents')
               .insert({
@@ -154,10 +156,15 @@ export function DocumentUpload({
             
             console.log(`Created document record with ID: ${document.id}`);
             
-            // For PDFs, check page count immediately
+            // Get PDF preview for page count and thumbnails
             let pageCount = 1; // Default for non-PDFs
+            const filePreview = fileUploadRef.current?.getPreviewsForFile(file);
             
-            const originalFilePath = `${user.id}/${document.id}/original.pdf`;
+            if (filePreview) {
+              pageCount = filePreview.pageCount || 1;
+            }
+            
+            const originalFilePath = `${user.id}/${document.id}/original${file.type.includes('pdf') ? '.pdf' : ''}`;
             const filePath = `${user.id}/${document.id}/${encodeURIComponent(file.name)}`;
             
             const uploadOptions = {
@@ -166,46 +173,7 @@ export function DocumentUpload({
             
             let lastProgress = 0;
             
-            const xhr = new XMLHttpRequest();
-            const uploadPromise = new Promise<void>((resolve, reject) => {
-              xhr.upload.addEventListener('progress', (event) => {
-                if (event.lengthComputable) {
-                  const percent = Math.round((event.loaded / event.total) * 100);
-                  if (percent > lastProgress) {
-                    lastProgress = percent;
-                    updateUploadProgress(uploadId, percent);
-                    console.log(`Upload progress for ${file.name}: ${percent}%`);
-                  }
-                }
-              });
-              
-              xhr.addEventListener('error', () => {
-                reject(new Error('XHR error occurred during upload'));
-              });
-              
-              xhr.addEventListener('abort', () => {
-                reject(new Error('Upload aborted'));
-              });
-              
-              xhr.addEventListener('load', () => {
-                if (xhr.status >= 200 && xhr.status < 300) {
-                  resolve();
-                } else {
-                  reject(new Error(`HTTP error ${xhr.status}: ${xhr.statusText}`));
-                }
-              });
-            });
-            
-            // Create a copy for original.pdf if it's a PDF file
-            if (file.type.includes('pdf')) {
-              const { error: originalUploadError } = await supabase.storage
-                .from('document_files')
-                .upload(originalFilePath, file, uploadOptions);
-                
-              if (originalUploadError) {
-                console.error("Error uploading original PDF:", originalUploadError);
-              }
-            }
+            updateUploadProgress(uploadId, 20);
             
             // Upload the file with its original name
             const { error: uploadError } = await supabase.storage
@@ -243,25 +211,35 @@ export function DocumentUpload({
               throw new Error(`Failed to upload file: ${uploadError.message}`);
             }
             
+            // Create a copy for original if it's a different path
+            if (filePath !== originalFilePath) {
+              const { error: originalUploadError } = await supabase.storage
+                .from('document_files')
+                .copy(filePath, originalFilePath);
+                
+              if (originalUploadError) {
+                console.error("Error creating original file copy:", originalUploadError);
+                // Continue despite error, not critical
+              }
+            }
+            
+            updateUploadProgress(uploadId, 60);
+            
             const { data: publicURL } = supabase.storage
               .from('document_files')
               .getPublicUrl(filePath);
-              
-            // For PDFs, get the public URL of the original.pdf file as well
-            let originalUrl = publicURL.publicUrl;
-            if (file.type.includes('pdf')) {
-              const { data: originalPublicURL } = supabase.storage
-                .from('document_files')
-                .getPublicUrl(originalFilePath);
-                
-              originalUrl = originalPublicURL.publicUrl;
-            }
             
+            // Get the original URL
+            const { data: originalPublicURL } = supabase.storage
+              .from('document_files')
+              .getPublicUrl(originalFilePath);
+              
+            // Update document with URLs and mark as uploaded
             await supabase
               .from('documents')
               .update({
                 status: 'uploaded',
-                original_url: originalUrl,
+                original_url: originalPublicURL.publicUrl,
                 updated_at: new Date().toISOString()
               })
               .eq('id', document.id);
@@ -276,52 +254,43 @@ export function DocumentUpload({
             updateUploadStatus(uploadId, 'complete');
             console.log(`File uploaded successfully: ${file.name}`);
             
+            // Process previews and upload page images
             try {
               updateUploadStatus(uploadId, 'processing');
               setIsProcessing(true);
               
-              // For PDFs, run the pdf-to-images process
-              if (file.type.includes('pdf')) {
-                // Update UI immediately with initial state
-                updatePageProgress(uploadId, 0, 1); // Start with 0 of unknown (1 as placeholder) pages
+              // Upload page images directly from the client-side previews
+              let thumbnailUrls: string[] = [];
+              if (filePreview && fileUploadRef.current) {
+                updatePageProgress(uploadId, 0, filePreview.pageCount);
                 
-                console.log(`Calling pdf-to-images function for document ${document.id} and user ${user.id}`);
+                // Upload the rendered page images to storage
+                thumbnailUrls = await fileUploadRef.current.uploadPageImagesToStorage(document.id, filePreview);
                 
-                const { data: processingResult, error: processingError } = await supabase.functions
-                  .invoke('pdf-to-images', {
-                    body: { 
-                      documentId: document.id, 
-                      userId: user.id 
-                    }
-                  });
+                // Update progress as we go
+                updatePageProgress(uploadId, thumbnailUrls.length, filePreview.pageCount);
+              }
+              
+              // Clear any existing pages for this document
+              await supabase
+                .from("document_pages")
+                .delete()
+                .eq("document_id", document.id);
+              
+              // Create page records for each page
+              if (filePreview && filePreview.pages.length > 0) {
+                // Batch insert all pages
+                const pageRecords = filePreview.pages.map((page, index) => ({
+                  document_id: document.id,
+                  page_number: page.pageNumber,
+                  image_url: thumbnailUrls[index] || '',
+                  text_content: '' // We'll update text content later if needed
+                }));
                 
-                if (processingError) {
-                  console.error("Processing error from edge function:", processingError);
-                  throw new Error(`Document processing failed: ${processingError.message}`);
-                }
-                
-                console.log('Processing result:', processingResult);
-                
-                if (!processingResult || !processingResult.success) {
-                  throw new Error(processingResult?.error || "Unknown error in PDF processing");
-                }
-                
-                if (processingResult && processingResult.pageCount) {
-                  pageCount = processingResult.pageCount;
-                  updatePageProgress(uploadId, processingResult.pageCount, processingResult.pageCount);
-                }
-              } else {
-                // For non-PDF files, mark as processed directly
-                await supabase
-                  .from('documents')
-                  .update({
-                    status: 'processed',
-                    page_count: 1
-                  })
-                  .eq('id', document.id);
-                
-                // Create a single page record for images
-                await supabase.from('document_pages').insert({
+                await supabase.from("document_pages").insert(pageRecords);
+              } else if (file.type.includes('image')) {
+                // For a single image, create one page record
+                await supabase.from("document_pages").insert({
                   document_id: document.id,
                   page_number: 1,
                   image_url: publicURL.publicUrl,
@@ -329,7 +298,7 @@ export function DocumentUpload({
                 });
               }
               
-              // Update final document with page count
+              // Update final document with page count and status
               await supabase
                 .from('documents')
                 .update({
@@ -339,12 +308,17 @@ export function DocumentUpload({
                 .eq('id', document.id);
               
               updateUploadStatus(uploadId, 'complete');
-              setIsProcessing(false);
+              updatePageProgress(uploadId, pageCount, pageCount);
               
-              await fetchUserDocuments();
+              await supabase.from('processing_logs').insert({
+                document_id: document.id,
+                action: 'Processing Completed',
+                status: 'success',
+                message: `Successfully processed ${pageCount} pages from ${file.name}`
+              });
+              
             } catch (processingError) {
               console.error('Error processing document:', processingError);
-              setIsProcessing(false);
               
               await supabase.from('processing_logs').insert({
                 document_id: document.id,
@@ -354,6 +328,8 @@ export function DocumentUpload({
               });
               
               updateUploadStatus(uploadId, 'error', processingError.message || 'Unknown processing error');
+            } finally {
+              setIsProcessing(false);
             }
             
             return document.id;
@@ -526,6 +502,7 @@ export function DocumentUpload({
             
             <TabsContent value="upload">
               <FileUpload
+                ref={fileUploadRef}
                 onFilesUploaded={handleFilesSelected}
                 accept={{ 'application/pdf': ['.pdf'] }}
                 disabled={isUploading || isProcessing}
