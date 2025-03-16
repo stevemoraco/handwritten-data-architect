@@ -1,5 +1,4 @@
-
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Progress } from '@/components/ui/progress';
 import { Button } from '@/components/ui/button';
@@ -12,8 +11,8 @@ import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocumentProxy } from 'pdfjs-dist/types/src/display/api';
 import { supabase } from '@/integrations/supabase/client';
 
-// Import the PDF.js worker from a CDN or local path that is guaranteed to work
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.js`;
+// Configure the worker source with a stable and reliable CDN URL
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.js`;
 
 interface FileUploadProps {
   accept?: Record<string, string[]>;
@@ -24,7 +23,7 @@ interface FileUploadProps {
   disabled?: boolean;
 }
 
-interface FilePreview {
+export interface FilePreview {
   file: File;
   pages: {
     pageNumber: number;
@@ -36,17 +35,22 @@ interface FilePreview {
   error?: string;
 }
 
-export function FileUpload({
+export interface FileUploadRef {
+  getPreviewsForFile: (file: File) => FilePreview | undefined;
+  uploadPageImagesToStorage: (documentId: string, preview: FilePreview) => Promise<string[]>;
+}
+
+export const FileUpload = forwardRef<FileUploadRef, FileUploadProps>(({
   accept = {
     'application/pdf': ['.pdf'],
     'image/*': ['.jpg', '.jpeg', '.png', '.gif'],
   },
   maxFiles = 10,
-  maxSize = 104857600, // 100MB (increased from 10MB)
+  maxSize = 104857600, // 100MB
   onFilesUploaded,
   className,
   disabled = false,
-}: FileUploadProps) {
+}, ref) => {
   const [files, setFiles] = useState<File[]>([]);
   const [filePreviews, setFilePreviews] = useState<FilePreview[]>([]);
   const { uploads, isUploading, addUpload, updateUploadProgress, updateUploadStatus, updatePageProgress } = useUpload();
@@ -298,14 +302,11 @@ export function FileUpload({
     disabled: disabled || isUploading,
   });
 
-  // Expose methods to parent components
-  React.useImperativeHandle(
-    React.forwardRef((_, ref) => ref),
-    () => ({
-      getPreviewsForFile,
-      uploadPageImagesToStorage
-    })
-  );
+  // Expose methods to parent components using useImperativeHandle
+  useImperativeHandle(ref, () => ({
+    getPreviewsForFile,
+    uploadPageImagesToStorage
+  }));
 
   return (
     <div className={cn('space-y-4', className)}>
@@ -436,7 +437,7 @@ export function FileUpload({
           </div>
         </div>
       )}
-
+      
       {uploads.length > 0 && (
         <div className="space-y-2">
           <p className="text-sm font-medium">Upload Progress</p>
@@ -528,4 +529,6 @@ export function FileUpload({
       )}
     </div>
   );
-}
+});
+
+FileUpload.displayName = 'FileUpload';

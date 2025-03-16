@@ -1,5 +1,5 @@
 import * as React from "react";
-import { FileUpload } from "@/components/ui/file-upload";
+import { FileUpload, FileUploadRef, FilePreview } from "@/components/ui/file-upload";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useUpload } from "@/context/UploadContext";
@@ -39,7 +39,7 @@ export function DocumentUpload({
 }: DocumentUploadProps) {
   const { isUploading, uploads, addUpload, updateUploadProgress, updateUploadStatus, updatePageProgress } = useUpload();
   const { user } = useAuth();
-  const { documents, isLoading, fetchUserDocuments } = useDocuments();
+  const { documents, isLoading, fetchUserDocuments, convertPdfToImages, processDocumentText } = useDocuments();
   const navigate = useNavigate();
   const [selectedFiles, setSelectedFiles] = React.useState<File[]>([]);
   const [uploadedDocumentIds, setUploadedDocumentIds] = React.useState<string[]>([]);
@@ -48,7 +48,7 @@ export function DocumentUpload({
   const [isProcessing, setIsProcessing] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [activeTab, setActiveTab] = React.useState<string>("existing");
-  const fileUploadRef = React.useRef<any>(null);
+  const fileUploadRef = React.useRef<FileUploadRef>(null);
 
   React.useEffect(() => {
     if (user) {
