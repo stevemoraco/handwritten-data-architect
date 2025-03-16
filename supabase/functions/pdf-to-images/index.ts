@@ -1,7 +1,11 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.8.0";
-import { decode as base64Decode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
+import * as pdfjs from "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/+esm";
+
+// Set worker source for PDF.js
+const pdfjsWorker = await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.mjs");
+globalThis.pdfjsWorker = pdfjsWorker;
 
 // CORS headers for browser requests
 const corsHeaders = {
@@ -71,10 +75,9 @@ serve(async (req) => {
       throw new Error("Document not found");
     }
     
-    // For PDFs, we need to download the file, extract pages, and upload each page as an image
     console.log("Downloading the PDF file...");
     
-    // Build the path to the PDF file - always use original.pdf
+    // Build path to the PDF file
     const pdfPath = `${userId}/${documentId}/original.pdf`;
     console.log(`PDF path: ${pdfPath}`);
     
@@ -91,9 +94,9 @@ serve(async (req) => {
       throw new Error("PDF file download returned no data");
     }
     
-    console.log("PDF file downloaded successfully");
+    console.log("PDF file downloaded successfully, processing with PDF.js");
     
-    // Update document status
+    // Update progress
     await supabase
       .from("documents")
       .update({
@@ -101,88 +104,142 @@ serve(async (req) => {
       })
       .eq("id", documentId);
     
-    // Use PDF metadata to get actual page count
-    // For now we'll use a simple approach but you could add a PDF parser library
-    // Read the first few kb of the PDF to find the /Count entry
-    const pdfText = new TextDecoder().decode(fileData.slice(0, Math.min(10000, fileData.size)));
+    // Convert ArrayBuffer to Uint8Array for PDF.js
+    const pdfData = new Uint8Array(await fileData.arrayBuffer());
     
-    // Try to find the /Count entry which typically indicates page count
-    const countMatch = /\/Count\s+(\d+)/.exec(pdfText);
+    // Load the PDF document using PDF.js
+    console.log("Loading PDF with PDF.js...");
+    const loadingTask = pdfjs.getDocument({ data: pdfData });
+    const pdfDocument = await loadingTask.promise;
     
-    // Default to 1 if we can't determine the count
-    let pageCount = 1;
-    
-    if (countMatch && countMatch[1]) {
-      pageCount = parseInt(countMatch[1], 10);
-      console.log(`Detected ${pageCount} pages from PDF metadata`);
-    } else {
-      // Fallback: count occurrences of "Page" or "/Page"
-      const pageMatches = pdfText.match(/\/Page\s*\//g);
-      if (pageMatches) {
-        pageCount = pageMatches.length;
-        console.log(`Estimated ${pageCount} pages from PDF structure`);
-      } else {
-        console.log("Could not determine page count, using default of 1");
-      }
-    }
-
-    // Make sure we have a reasonable value (at least 1, and not too large)
-    pageCount = Math.max(1, Math.min(pageCount, 1000));
-    
-    console.log(`Using page count: ${pageCount}`);
+    // Get the actual page count from the PDF
+    const pageCount = pdfDocument.numPages;
+    console.log(`PDF loaded successfully. Page count: ${pageCount}`);
     
     // Update the document with the page count
     await supabase
       .from("documents")
       .update({
         page_count: pageCount,
-        processing_progress: 50
+        processing_progress: 40
       })
       .eq("id", documentId);
     
     // Clear any existing pages
+    console.log("Clearing any existing pages...");
     const { error: deleteError } = await supabase
       .from("document_pages")
       .delete()
       .eq("document_id", documentId);
-      
+    
     if (deleteError) {
       console.error(`Error clearing existing pages: ${deleteError.message}`);
     }
     
-    // Generate a public URL for the original PDF that all pages will reference
-    const { data: urlData } = supabase.storage
-      .from("document_files")
-      .getPublicUrl(`${userId}/${documentId}/original.pdf`);
-      
-    if (!urlData || !urlData.publicUrl) {
-      throw new Error("Failed to generate public URL for the PDF");
-    }
+    // Create a storage folder for the page images
+    const imagesFolder = `${userId}/${documentId}/pages`;
     
-    const pdfUrl = urlData.publicUrl;
-    console.log(`PDF public URL: ${pdfUrl}`);
+    console.log(`Processing ${pageCount} pages and creating images...`);
     
-    // Create a document page record for each page, pointing to the PDF with page parameter
+    // Process each page
     for (let i = 0; i < pageCount; i++) {
       const pageNumber = i + 1;
+      const progressPercent = 40 + Math.floor((i / pageCount) * 50);
       
       // Update progress
       await supabase
         .from("documents")
         .update({
-          processing_progress: 50 + Math.floor((i / pageCount) * 40)
+          processing_progress: progressPercent
         })
         .eq("id", documentId);
       
-      // Create a document page record with the image URL pointing to the PDF with page parameter
-      await supabase.from("document_pages").insert({
-        document_id: documentId,
-        page_number: pageNumber,
-        image_url: `${pdfUrl}#page=${pageNumber}`, // Add page parameter for PDF viewer
-        text_content: `Content from page ${pageNumber}` // Placeholder text content
-      });
-      
-      console.log(`Created page ${pageNumber} record`);
+      try {
+        console.log(`Rendering page ${pageNumber}...`);
+        
+        // Get the page
+        const page = await pdfDocument.getPage(pageNumber);
+        
+        // Set rendering parameters
+        const viewport = page.getViewport({ scale: 1.5 });
+        const canvas = new OffscreenCanvas(viewport.width, viewport.height);
+        const context = canvas.getContext('2d');
+        
+        // Render the page to canvas
+        const renderContext = {
+          canvasContext: context,
+          viewport: viewport
+        };
+        
+        await page.render(renderContext).promise;
+        
+        // Convert canvas to blob
+        const imageBlob = await canvas.convertToBlob({ 
+          type: 'image/jpeg',
+          quality: 0.8
+        });
+        
+        // Convert Blob to ArrayBuffer for Supabase storage
+        const imageArrayBuffer = await imageBlob.arrayBuffer();
+        
+        // Upload the image to storage
+        const imagePath = `${imagesFolder}/page-${pageNumber}.jpg`;
+        const { error: uploadError } = await supabase.storage
+          .from("document_files")
+          .upload(imagePath, imageArrayBuffer, {
+            contentType: 'image/jpeg',
+            cacheControl: '3600'
+          });
+        
+        if (uploadError) {
+          console.error(`Error uploading page ${pageNumber} image:`, uploadError);
+          throw uploadError;
+        }
+        
+        // Get public URL for the image
+        const { data: urlData } = supabase.storage
+          .from("document_files")
+          .getPublicUrl(imagePath);
+        
+        if (!urlData || !urlData.publicUrl) {
+          throw new Error(`Failed to get public URL for page ${pageNumber}`);
+        }
+        
+        // Extract text content from the page (if available)
+        let textContent = "";
+        try {
+          const textContent = await page.getTextContent();
+          const textItems = textContent.items;
+          const pageText = textItems
+            .map(item => 'str' in item ? item.str : '')
+            .join(' ');
+            
+          textContent = pageText;
+        } catch (textError) {
+          console.warn(`Could not extract text from page ${pageNumber}:`, textError);
+          textContent = `Text extraction not available for page ${pageNumber}`;
+        }
+        
+        // Create document page record
+        await supabase.from("document_pages").insert({
+          document_id: documentId,
+          page_number: pageNumber,
+          image_url: urlData.publicUrl,
+          text_content: textContent
+        });
+        
+        console.log(`Successfully processed page ${pageNumber}`);
+      } catch (pageError) {
+        console.error(`Error processing page ${pageNumber}:`, pageError);
+        
+        // Log the error but continue processing other pages
+        await supabase.from("processing_logs").insert({
+          document_id: documentId,
+          action: `Page ${pageNumber} Processing Error`,
+          status: "error",
+          message: pageError instanceof Error ? pageError.message : "Unknown error"
+        });
+      }
     }
     
     // Update document status to processed
@@ -232,7 +289,7 @@ serve(async (req) => {
           .from("documents")
           .update({
             status: "failed",
-            processing_error: error.message
+            processing_error: error instanceof Error ? error.message : "Unknown error occurred"
           })
           .eq("id", documentId);
         
@@ -241,7 +298,7 @@ serve(async (req) => {
           document_id: documentId,
           action: "PDF Processing Failed",
           status: "error",
-          message: error.message
+          message: error instanceof Error ? error.message : "Unknown error occurred"
         });
       }
     } catch (logError) {
@@ -251,7 +308,7 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({
         success: false,
-        error: error.message || "Unknown error occurred"
+        error: error instanceof Error ? error.message : "Unknown error occurred"
       }),
       { headers: corsHeaders, status: 500 }
     );
