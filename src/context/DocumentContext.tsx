@@ -1,9 +1,9 @@
-
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { Document, DocumentSchema, DocumentPipeline, ProcessingLog } from '@/types';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from './AuthContext';
 import { useToast } from '@/components/ui/use-toast';
+import { supabase } from '@/lib/supabase';
 
 interface DocumentContextType {
   documents: Document[];
@@ -42,7 +42,7 @@ interface DocumentProviderProps {
   children: ReactNode;
 }
 
-export const DocumentProvider = ({ children }: DocumentProviderProps) => {
+export function DocumentProvider({ children }: { children: React.ReactNode }) {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [schemas, setSchemas] = useState<DocumentSchema[]>([]);
   const [pipelines, setPipelines] = useState<DocumentPipeline[]>([]);
@@ -51,10 +51,8 @@ export const DocumentProvider = ({ children }: DocumentProviderProps) => {
   const { user } = useAuth();
   const { toast } = useToast();
 
-  // Load initial data when user changes
   useEffect(() => {
     if (user) {
-      // This would be replaced with actual API calls
       const storedDocuments = localStorage.getItem('documents');
       const storedSchemas = localStorage.getItem('schemas');
       const storedPipelines = localStorage.getItem('pipelines');
@@ -67,7 +65,6 @@ export const DocumentProvider = ({ children }: DocumentProviderProps) => {
     }
   }, [user]);
 
-  // Save data when it changes
   useEffect(() => {
     if (user) {
       localStorage.setItem('documents', JSON.stringify(documents));
@@ -77,7 +74,6 @@ export const DocumentProvider = ({ children }: DocumentProviderProps) => {
     }
   }, [documents, schemas, pipelines, logs, user]);
 
-  // Document methods
   const addDocument = async (document: Partial<Document>): Promise<Document> => {
     if (!user) throw new Error('User must be logged in');
     
@@ -117,7 +113,6 @@ export const DocumentProvider = ({ children }: DocumentProviderProps) => {
     setDocuments((prev) => prev.filter((doc) => doc.id !== id));
   };
 
-  // Schema methods
   const addSchema = async (schema: Partial<DocumentSchema>): Promise<DocumentSchema> => {
     if (!user) throw new Error('User must be logged in');
     
@@ -157,7 +152,6 @@ export const DocumentProvider = ({ children }: DocumentProviderProps) => {
     setSchemas((prev) => prev.filter((schema) => schema.id !== id));
   };
 
-  // Pipeline methods
   const addPipeline = async (pipeline: Partial<DocumentPipeline>): Promise<DocumentPipeline> => {
     if (!user) throw new Error('User must be logged in');
     
@@ -198,7 +192,6 @@ export const DocumentProvider = ({ children }: DocumentProviderProps) => {
     setPipelines((prev) => prev.filter((pipeline) => pipeline.id !== id));
   };
 
-  // Log methods
   const addLog = async (log: Partial<ProcessingLog>): Promise<ProcessingLog> => {
     const newLog: ProcessingLog = {
       id: uuidv4(),
@@ -219,62 +212,39 @@ export const DocumentProvider = ({ children }: DocumentProviderProps) => {
     setLogs([]);
   };
 
-  // Document processing methods
-  const convertPdfToImages = async (documentId: string): Promise<string[]> => {
-    setIsProcessing(true);
+  const convertPdfToImages = async (documentId: string) => {
+    if (!user) {
+      throw new Error("User must be authenticated to convert documents");
+    }
+
     try {
-      await addLog({
-        documentId,
-        action: 'Convert PDF to Images',
-        status: 'success',
-        message: 'Started PDF to image conversion',
-      });
+      const { data: document, error: documentError } = await supabase
+        .from("documents")
+        .select("*")
+        .eq("id", documentId)
+        .single();
 
-      // This would be replaced with actual API call to convert PDF
-      const document = documents.find((doc) => doc.id === documentId);
-      if (!document) throw new Error('Document not found');
+      if (documentError) {
+        throw new Error(`Failed to fetch document: ${documentError.message}`);
+      }
 
-      // Mock conversion process
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      
-      // Generate mock thumbnails
-      const thumbnails = Array(5).fill(0).map((_, i) => 
-        `https://via.placeholder.com/150?text=Page${i+1}`
-      );
-      
-      const updatedDoc = await updateDocument(documentId, {
-        status: 'processed',
-        thumbnails,
-        pageCount: thumbnails.length,
-      });
-      
-      await addLog({
-        documentId,
-        action: 'Convert PDF to Images',
-        status: 'success',
-        message: `Successfully converted PDF to ${thumbnails.length} images`,
-      });
-      
-      return thumbnails;
+      if (!document) {
+        throw new Error("Document not found");
+      }
+
+      const { data: result, error: processingError } = await supabase.functions
+        .invoke("pdf-to-images", {
+          body: { documentId, userId: user.id }
+        });
+
+      if (processingError) {
+        throw new Error(`Failed to process document: ${processingError.message}`);
+      }
+
+      return result;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      
-      await addLog({
-        documentId,
-        action: 'Convert PDF to Images',
-        status: 'error',
-        message: `Failed to convert PDF: ${errorMessage}`,
-      });
-      
-      toast({
-        title: 'Conversion failed',
-        description: `Failed to convert PDF to images: ${errorMessage}`,
-        variant: 'destructive',
-      });
-      
+      console.error("Error converting PDF to images:", error);
       throw error;
-    } finally {
-      setIsProcessing(false);
     }
   };
 
@@ -688,32 +658,28 @@ export const DocumentProvider = ({ children }: DocumentProviderProps) => {
     }
   };
 
-  return (
-    <DocumentContext.Provider
-      value={{
-        documents,
-        schemas,
-        pipelines,
-        logs,
-        addDocument,
-        updateDocument,
-        deleteDocument,
-        addSchema,
-        updateSchema,
-        deleteSchema,
-        addPipeline,
-        updatePipeline,
-        deletePipeline,
-        addLog,
-        clearLogs,
-        convertPdfToImages,
-        processDocumentText,
-        generateSchema,
-        processDocumentData,
-        isProcessing,
-      }}
-    >
-      {children}
-    </DocumentContext.Provider>
-  );
-};
+  const value = {
+    documents,
+    schemas,
+    pipelines,
+    logs,
+    addDocument,
+    updateDocument,
+    deleteDocument,
+    addSchema,
+    updateSchema,
+    deleteSchema,
+    addPipeline,
+    updatePipeline,
+    deletePipeline,
+    addLog,
+    clearLogs,
+    convertPdfToImages,
+    processDocumentText,
+    generateSchema,
+    processDocumentData,
+    isProcessing,
+  };
+
+  return <DocumentContext.Provider value={value}>{children}</DocumentContext.Provider>;
+}

@@ -1,3 +1,4 @@
+
 import * as React from "react";
 import { FileUpload } from "@/components/ui/file-upload";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -178,9 +179,10 @@ export function DocumentUpload({
               const estimatedPageCount = Math.max(1, Math.ceil(file.size / 100000));
               updatePageProgress(uploadId, 0, estimatedPageCount);
               
+              // Directly call the PDF to images conversion function
               const { data: processingResult, error: processingError } = await supabase.functions
-                .invoke('process-document', {
-                  body: { documentId: document.id }
+                .invoke('pdf-to-images', {
+                  body: { documentId: document.id, userId: user.id }
                 });
               
               if (processingError) {
