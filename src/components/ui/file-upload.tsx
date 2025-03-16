@@ -1,9 +1,10 @@
+
 import React, { useState, useCallback, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Progress } from '@/components/ui/progress';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { FileIcon, UploadIcon, XIcon, CheckIcon, AlertCircleIcon } from 'lucide-react';
+import { FileIcon, UploadIcon, XIcon, CheckIcon, AlertCircleIcon, ImageIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { useUpload } from '@/context/UploadContext';
@@ -33,19 +34,17 @@ export function FileUpload({
 
   const onDrop = useCallback(
     (acceptedFiles: File[]) => {
-      setFiles((currentFiles) => {
-        const newFiles = acceptedFiles.filter(
-          (file) => !currentFiles.some((f) => f.name === file.name && f.size === file.size)
-        );
-        
-        if (onFilesUploaded) {
-          onFilesUploaded(newFiles);
-        }
-
-        return [...currentFiles, ...newFiles];
-      });
+      const newFiles = acceptedFiles.filter(
+        (file) => !files.some((f) => f.name === file.name && f.size === file.size)
+      );
+      
+      setFiles((currentFiles) => [...currentFiles, ...newFiles]);
+      
+      if (newFiles.length > 0 && onFilesUploaded) {
+        onFilesUploaded(newFiles);
+      }
     },
-    [onFilesUploaded]
+    [files, onFilesUploaded]
   );
 
   const { getRootProps, getInputProps, isDragActive, isDragReject } = useDropzone({
@@ -112,22 +111,67 @@ export function FileUpload({
                 <FileIcon className="h-6 w-6 text-primary/70" />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{upload.fileName}</p>
+                  
+                  {/* Different progress display for different stages */}
                   <div className="mt-1">
-                    <Progress value={upload.progress} className="h-2" />
+                    {/* File upload progress */}
+                    {upload.status === 'uploading' && (
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-xs">
+                          <span>Uploading file</span>
+                          <span>{upload.progress}%</span>
+                        </div>
+                        <Progress value={upload.progress} className="h-2" />
+                      </div>
+                    )}
+                    
+                    {/* Processing progress with page count */}
+                    {upload.status === 'processing' && (
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-xs">
+                          <span className="flex items-center">
+                            <ImageIcon className="h-3 w-3 mr-1" />
+                            Converting pages to images
+                          </span>
+                          <span>{upload.pagesProcessed || 0} of {upload.pageCount || '?'} pages</span>
+                        </div>
+                        <Progress 
+                          value={upload.pageCount ? (upload.pagesProcessed / upload.pageCount) * 100 : 0} 
+                          className="h-2" 
+                        />
+                      </div>
+                    )}
+                    
+                    {/* Simple progress bar for completed or other states */}
+                    {(upload.status === 'complete' || (upload.status !== 'uploading' && upload.status !== 'processing' && upload.status !== 'error')) && (
+                      <Progress value={upload.progress} className="h-2" />
+                    )}
+                    
+                    {/* Error message display */}
+                    {upload.status === 'error' && upload.message && (
+                      <div className="mt-2 text-xs text-destructive bg-destructive/10 p-2 rounded border border-destructive/20 whitespace-normal">
+                        <p className="font-medium mb-1">Error:</p>
+                        <p className="break-words">{upload.message}</p>
+                      </div>
+                    )}
                   </div>
                 </div>
+                
                 <Badge
                   variant={
                     upload.status === 'complete'
                       ? 'default'
                       : upload.status === 'error'
                       ? 'destructive'
+                      : upload.status === 'processing'
+                      ? 'secondary'
                       : 'outline'
                   }
-                  className="ml-2"
+                  className="ml-2 whitespace-nowrap"
                 >
                   {upload.status === 'complete' && <CheckIcon className="h-3 w-3 mr-1" />}
                   {upload.status === 'error' && <AlertCircleIcon className="h-3 w-3 mr-1" />}
+                  {upload.status === 'processing' && <ImageIcon className="h-3 w-3 mr-1" />}
                   {upload.status}
                 </Badge>
               </div>

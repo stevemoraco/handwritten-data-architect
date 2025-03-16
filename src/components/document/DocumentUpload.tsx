@@ -22,7 +22,7 @@ export function DocumentUpload({
   pipelineId,
   className,
 }: DocumentUploadProps) {
-  const { isUploading, uploads, addUpload, updateUploadProgress, updateUploadStatus } = useUpload();
+  const { isUploading, uploads, addUpload, updateUploadProgress, updateUploadStatus, updatePageProgress } = useUpload();
   const { user } = useAuth();
   const navigate = useNavigate();
   const [selectedFiles, setSelectedFiles] = React.useState<File[]>([]);
@@ -172,7 +172,11 @@ export function DocumentUpload({
             console.log(`File uploaded successfully: ${file.name}`);
             
             try {
+              updateUploadStatus(uploadId, 'processing');
               setIsProcessing(true);
+              
+              const estimatedPageCount = Math.max(1, Math.ceil(file.size / 100000));
+              updatePageProgress(uploadId, 0, estimatedPageCount);
               
               const { data: processingResult, error: processingError } = await supabase.functions
                 .invoke('process-document', {
@@ -184,6 +188,12 @@ export function DocumentUpload({
               }
               
               console.log('Processing result:', processingResult);
+              
+              if (processingResult && processingResult.pageCount) {
+                updatePageProgress(uploadId, processingResult.pageCount, processingResult.pageCount);
+              }
+              
+              updateUploadStatus(uploadId, 'complete');
               setIsProcessing(false);
             } catch (processingError) {
               console.error('Error processing document:', processingError);
@@ -196,22 +206,13 @@ export function DocumentUpload({
                 message: processingError.message || 'Unknown processing error'
               });
               
-              toast({
-                title: 'Processing Warning',
-                description: `Your file was uploaded but processing encountered an issue: ${processingError.message}`,
-                variant: 'destructive',
-              });
+              updateUploadStatus(uploadId, 'error', processingError.message || 'Unknown processing error');
             }
             
             return document.id;
           } catch (error) {
             console.error(`Error uploading ${file.name}:`, error);
-            updateUploadStatus(uploadId, 'error', error.message);
-            toast({
-              title: 'Upload failed',
-              description: error.message || 'An unknown error occurred',
-              variant: 'destructive',
-            });
+            updateUploadStatus(uploadId, 'error', error.message || 'Unknown error occurred');
             throw error;
           }
         })
@@ -234,11 +235,6 @@ export function DocumentUpload({
     } catch (error) {
       console.error('Unexpected error in file upload handler:', error);
       setError(`An unexpected error occurred: ${error.message}`);
-      toast({
-        title: 'Upload failed',
-        description: error.message || 'An unexpected error occurred',
-        variant: 'destructive',
-      });
     }
   };
 

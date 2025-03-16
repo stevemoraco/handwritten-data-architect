@@ -9,6 +9,7 @@ interface UploadContextType {
   addUpload: (fileName: string) => string;
   updateUploadProgress: (id: string, progress: number) => void;
   updateUploadStatus: (id: string, status: UploadProgress['status'], message?: string) => void;
+  updatePageProgress: (id: string, pagesProcessed: number, pageCount: number) => void;
   clearUploads: () => void;
   isUploading: boolean;
 }
@@ -39,6 +40,8 @@ export const UploadProvider = ({ children }: UploadProviderProps) => {
         fileName,
         progress: 0,
         status: 'uploading',
+        pagesProcessed: 0,
+        pageCount: 0
       },
     ]);
     return id;
@@ -63,29 +66,38 @@ export const UploadProvider = ({ children }: UploadProviderProps) => {
       )
     );
 
-    // Show toast for completed or errored uploads
+    // Only show toast for completion, not for errors
     const upload = uploads.find((u) => u.id === id);
-    if (upload) {
-      if (status === 'complete') {
-        toast({
-          title: 'Upload complete',
-          description: `${upload.fileName} has been uploaded successfully.`,
-        });
-      } else if (status === 'error') {
-        toast({
-          title: 'Upload failed',
-          description: message || `Failed to upload ${upload.fileName}.`,
-          variant: 'destructive',
-        });
-      }
+    if (upload && status === 'complete') {
+      toast({
+        title: 'Upload complete',
+        description: `${upload.fileName} has been uploaded successfully.`,
+      });
     }
+    // We no longer show error toasts as they'll be displayed in the UI
+  };
+
+  const updatePageProgress = (id: string, pagesProcessed: number, pageCount: number) => {
+    setUploads((prev) =>
+      prev.map((upload) =>
+        upload.id === id 
+          ? { 
+              ...upload, 
+              pagesProcessed, 
+              pageCount, 
+              status: 'processing',
+              progress: pageCount > 0 ? Math.round((pagesProcessed / pageCount) * 100) : upload.progress 
+            } 
+          : upload
+      )
+    );
   };
 
   const clearUploads = () => {
     setUploads([]);
   };
 
-  const isUploading = uploads.some((upload) => upload.status === 'uploading');
+  const isUploading = uploads.some((upload) => upload.status === 'uploading' || upload.status === 'processing');
 
   return (
     <UploadContext.Provider
@@ -94,6 +106,7 @@ export const UploadProvider = ({ children }: UploadProviderProps) => {
         addUpload,
         updateUploadProgress,
         updateUploadStatus,
+        updatePageProgress,
         clearUploads,
         isUploading,
       }}

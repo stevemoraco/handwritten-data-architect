@@ -1,4 +1,3 @@
-
 export interface User {
   id: string;
   email: string;
@@ -115,6 +114,8 @@ export interface UploadProgress {
   progress: number;
   status: 'uploading' | 'processing' | 'complete' | 'error';
   message?: string;
+  pagesProcessed?: number;
+  pageCount?: number;
 }
 
 export interface ChatMessage {
