@@ -72,28 +72,6 @@ serve(async (req) => {
 
     console.log(`Processing document: ${document.name}, URL: ${document.original_url}`);
 
-    // Create storage bucket if it doesn't exist
-    const bucketName = 'document_files';
-    
-    try {
-      const { data: buckets, error: bucketsError } = await supabase.storage.listBuckets();
-      
-      if (bucketsError) {
-        console.error("Error checking buckets:", bucketsError);
-        throw new Error(`Error checking storage buckets: ${bucketsError.message}`);
-      }
-      
-      const bucketExists = buckets.some(bucket => bucket.name === bucketName);
-      
-      // Skip bucket creation and updating - use what's already there
-      if (!bucketExists) {
-        console.log(`Bucket '${bucketName}' doesn't exist, but we'll proceed anyway`);
-      }
-    } catch (bucketError) {
-      console.error("Bucket setup error:", bucketError);
-      // Continue despite bucket error - we'll assume it exists
-    }
-
     // Update document status to processing
     await supabase
       .from('documents')
@@ -130,7 +108,7 @@ serve(async (req) => {
       try {
         const { data: fileData, error: downloadError } = await supabase
           .storage
-          .from(bucketName)
+          .from("document_files")
           .download(filePath);
         
         if (!downloadError && fileData) {
@@ -174,8 +152,6 @@ serve(async (req) => {
       }
       
       // More accurate page count estimation based on PDF structure
-      // This is a heuristic method that's more accurate than file size
-      // In a real system, you'd use a proper PDF parser library
       const pdfText = new TextDecoder().decode(pdfBuffer);
       
       // Count the number of "/Page" objects in the PDF
@@ -191,7 +167,6 @@ serve(async (req) => {
         .eq('document_id', documentId);
       
       // Create document pages with placeholder thumbnails
-      // In a real implementation, we'd use a PDF to image conversion service
       const thumbnails = [];
       
       for (let i = 0; i < estimatedPageCount; i++) {
@@ -204,8 +179,6 @@ serve(async (req) => {
           })
           .eq('id', documentId);
         
-        // Create thumbnail URL - in this implementation, we'll use placeholder images
-        // but in a real system you'd generate actual thumbnails
         const pageNumber = i + 1;
         
         // Extract a portion of text for this page
@@ -214,9 +187,11 @@ serve(async (req) => {
         const endIdx = startIdx + pageSize;
         const pageText = pdfText.substring(startIdx, endIdx);
         
-        // Generate a more realistic page preview using a placeholder service
-        // In a real implementation, you would render the PDF page to an image
+        // Generate a placeholder page preview
+        // In this example we're using placehold.co directly so we don't need to handle image storage
         const thumbnailUrl = `https://placehold.co/800x1100/f5f5f5/333333?text=Page+${pageNumber}`;
+        
+        console.log(`Creating page ${pageNumber} with thumbnail: ${thumbnailUrl}`);
         
         // Store page info in database
         const { data: pageData, error: pageError } = await supabase
@@ -234,14 +209,11 @@ serve(async (req) => {
           console.error(`Error storing page ${pageNumber}:`, pageError);
         } else {
           thumbnails.push(pageData.image_url);
+          console.log(`Successfully stored page ${pageNumber} with ID: ${pageData.id}`);
         }
-        
-        console.log(`Processed page ${pageNumber} of ${estimatedPageCount}`);
       }
 
       // Extract text content from the PDF for transcription
-      // In a real system, you'd use OCR or PDF text extraction
-      // For this example, we'll use a basic extraction based on the PDF content
       const textContent = pdfText
         .replace(/^\s*\d+\s*$/gm, '') // Remove page numbers
         .replace(/[\r\n]+/g, '\n')    // Normalize line endings

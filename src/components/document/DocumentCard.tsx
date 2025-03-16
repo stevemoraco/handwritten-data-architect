@@ -46,18 +46,23 @@ export function DocumentCard({
   const [isConverting, setIsConverting] = React.useState(false);
   const [isProcessingText, setIsProcessingText] = React.useState(false);
   const [progress, setProgress] = React.useState(document.processing_progress || 0);
-  const [conversionError, setConversionError] = React.useState<string | null>(document.error || null);
+  const [conversionError, setConversionError] = React.useState<string | null>(document.processing_error || null);
+  const [thumbnails, setThumbnails] = React.useState<string[]>(document.thumbnails || []);
 
   React.useEffect(() => {
     setProgress(document.processing_progress || 0);
-    setConversionError(document.error || null);
+    setConversionError(document.processing_error || null);
+    
+    if (document.thumbnails) {
+      setThumbnails(document.thumbnails);
+    }
     
     // If document status changes from processing to another state, reset our local states
     if (document.status !== "processing") {
       setIsConverting(false);
       setIsProcessingText(false);
     }
-  }, [document.processing_progress, document.status, document.error]);
+  }, [document.processing_progress, document.status, document.processing_error, document.thumbnails]);
 
   const getStatusColor = (status: Document["status"]) => {
     switch (status) {
@@ -105,6 +110,7 @@ export function DocumentCard({
         description: error instanceof Error ? error.message : "An error occurred",
         variant: "destructive",
       });
+      setIsConverting(false);
     }
   };
 
@@ -239,11 +245,11 @@ export function DocumentCard({
         </CardContent>
       )}
       
-      {document.thumbnails && document.thumbnails.length > 0 ? (
+      {thumbnails && thumbnails.length > 0 ? (
         <CardContent className="p-0">
           <ScrollArea className="w-full">
             <div className="flex p-4 gap-3">
-              {document.thumbnails.map((url, index) => (
+              {thumbnails.map((url, index) => (
                 <div
                   key={index}
                   className="relative w-20 h-24 flex-shrink-0 overflow-hidden rounded border"
@@ -253,8 +259,9 @@ export function DocumentCard({
                     alt={`Page ${index + 1}`}
                     className="h-full w-full object-cover transition-transform"
                     onError={(e) => {
+                      console.log(`Image failed to load: ${url}`);
                       // Fallback for broken images
-                      (e.target as HTMLImageElement).src = 'https://placehold.co/160x192/f5f5f5/333333?text=Page+'+(index+1);
+                      (e.target as HTMLImageElement).src = `https://placehold.co/160x192/f5f5f5/333333?text=Page+${index+1}`;
                     }}
                   />
                   <div className="absolute inset-0 bg-black/5 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
@@ -274,11 +281,11 @@ export function DocumentCard({
         </CardContent>
       )}
       
-      {document.error && !conversionError && (
+      {document.processing_error && !conversionError && (
         <CardContent className="px-4 pb-0 pt-0">
           <div className="text-xs text-destructive bg-destructive/10 p-2 rounded border border-destructive/20">
             <p className="font-medium">Error:</p>
-            <p className="break-words">{document.error}</p>
+            <p className="break-words">{document.processing_error}</p>
           </div>
         </CardContent>
       )}
@@ -314,7 +321,7 @@ export function DocumentCard({
               <RefreshCw className="h-3 w-3 mr-1" />
               Retry
             </>
-          ) : document.thumbnails && document.thumbnails.length > 0 ? (
+          ) : thumbnails && thumbnails.length > 0 ? (
             <>
               <RotateCw className="h-3 w-3 mr-1" />
               Reconvert
@@ -333,7 +340,7 @@ export function DocumentCard({
           variant="outline"
           className="h-8 text-xs"
           onClick={handleProcessText}
-          disabled={isProcessingText || document.status === "processing" || (!document.thumbnails || document.thumbnails.length === 0)}
+          disabled={isProcessingText || document.status === "processing" || (!thumbnails || thumbnails.length === 0)}
         >
           {isProcessingText ? (
             <>

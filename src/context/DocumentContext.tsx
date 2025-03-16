@@ -1,5 +1,5 @@
 
-import { createContext, useContext, useState, ReactNode, useEffect } from "react";
+import { createContext, useContext, useState, ReactNode, useEffect, useCallback } from "react";
 import { Document, DocumentSchema, ProcessingLog } from "@/types";
 import { toast } from "@/components/ui/use-toast";
 import { useAuth } from "@/context/AuthContext";
@@ -28,12 +28,90 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(false);
   const { user } = useAuth();
 
+  // Set up realtime subscription for documents updates
+  useEffect(() => {
+    if (user) {
+      const subscription = supabase
+        .channel('document-updates')
+        .on('postgres_changes', { 
+          event: 'UPDATE', 
+          schema: 'public', 
+          table: 'documents',
+          filter: `user_id=eq.${user.id}`
+        }, (payload) => {
+          console.log("Document update received:", payload);
+          // Update the document in the local state
+          setDocuments(prevDocs => 
+            prevDocs.map(doc => 
+              doc.id === payload.new.id 
+                ? {
+                    ...doc,
+                    status: payload.new.status,
+                    processing_progress: payload.new.processing_progress,
+                    processing_error: payload.new.processing_error,
+                    page_count: payload.new.page_count,
+                    transcription: payload.new.transcription,
+                    updatedAt: payload.new.updated_at
+                  }
+                : doc
+            )
+          );
+          
+          // If the document has been processed, fetch the thumbnails
+          if (payload.new.status === 'processed' && payload.new.id) {
+            loadDocumentThumbnails(payload.new.id);
+          }
+        })
+        .subscribe();
+      
+      return () => {
+        subscription.unsubscribe();
+      };
+    }
+  }, [user]);
+
   useEffect(() => {
     if (user) {
       fetchUserDocuments();
       fetchUserSchemas();
     }
   }, [user]);
+
+  const loadDocumentThumbnails = async (documentId: string) => {
+    console.log(`Loading thumbnails for document: ${documentId}`);
+    try {
+      const { data: pages, error: pagesError } = await supabase
+        .from("document_pages")
+        .select("image_url, page_number")
+        .eq("document_id", documentId)
+        .order("page_number", { ascending: true });
+
+      if (pagesError) {
+        console.error(`Error fetching thumbnails for doc ${documentId}:`, pagesError);
+        return;
+      }
+
+      if (pages && pages.length > 0) {
+        // Filter out any null or undefined URLs
+        const thumbnails = pages
+          .map(page => page.image_url)
+          .filter(url => !!url);
+          
+        console.log(`Loaded ${thumbnails.length} thumbnails for document ${documentId}`);
+        
+        // Update the document in state with the new thumbnails
+        setDocuments(prevDocs => 
+          prevDocs.map(doc => 
+            doc.id === documentId 
+              ? { ...doc, thumbnails }
+              : doc
+          )
+        );
+      }
+    } catch (err) {
+      console.error(`Failed to load thumbnails for doc ${documentId}:`, err);
+    }
+  };
 
   const fetchUserDocuments = async () => {
     if (!user) return;
@@ -66,34 +144,12 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         organizationId: doc.pipeline_id, // Use pipeline_id instead of organization_id
         pipelineId: doc.pipeline_id,
         processing_progress: doc.processing_progress,
-        error: doc.processing_error
+        processing_error: doc.processing_error
       }));
 
       // Fetch thumbnails for each document
       for (const doc of documentsList) {
-        try {
-          const { data: pages, error: pagesError } = await supabase
-            .from("document_pages")
-            .select("image_url, page_number")
-            .eq("document_id", doc.id)
-            .order("page_number", { ascending: true });
-
-          if (pagesError) {
-            console.error(`Error fetching thumbnails for doc ${doc.id}:`, pagesError);
-            continue;
-          }
-
-          if (pages && pages.length > 0) {
-            // Filter out any null or undefined URLs
-            doc.thumbnails = pages
-              .map(page => page.image_url)
-              .filter(url => !!url);
-              
-            console.log(`Loaded ${doc.thumbnails.length} thumbnails for document ${doc.id}`);
-          }
-        } catch (err) {
-          console.error(`Failed to load thumbnails for doc ${doc.id}:`, err);
-        }
+        await loadDocumentThumbnails(doc.id);
       }
 
       setDocuments(documentsList);
@@ -258,7 +314,7 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
       updateDocument(documentId, { 
         status: "processing",
         processing_progress: 0,
-        error: null 
+        processing_error: null 
       });
       
       // Update the status in the database
@@ -278,37 +334,12 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         status: "success",
         message: `Starting PDF to images conversion process for document ${documentId}`
       });
-      
-      // Set up a subscription to track progress
-      const conversionSubscription = supabase
-        .channel(`document-conversion-${documentId}`)
-        .on('postgres_changes', { 
-          event: 'UPDATE', 
-          schema: 'public', 
-          table: 'documents',
-          filter: `id=eq.${documentId}` 
-        }, (payload) => {
-          console.log("Document update received:", payload);
-          
-          // Update the local state with the progress
-          updateDocument(documentId, { 
-            status: payload.new.status,
-            processing_progress: payload.new.processing_progress,
-            error: payload.new.processing_error
-          });
-        })
-        .subscribe();
-      
+            
       // Call the PDF to images function
       const { data, error } = await supabase.functions.invoke('pdf-to-images', {
         body: { documentId, userId: user.id }
       });
-      
-      // Unsubscribe from the channel after a delay
-      setTimeout(() => {
-        conversionSubscription.unsubscribe();
-      }, 60000); // Keep subscription for 1 minute
-      
+            
       if (error) {
         console.error("Error invoking pdf-to-images function:", error);
         throw new Error(`Failed to convert PDF: ${error.message}`);
@@ -319,10 +350,16 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         throw new Error(data?.error || "Unknown error in PDF conversion");
       }
       
-      // Refresh the documents list after a short delay
-      setTimeout(() => {
-        fetchUserDocuments();
-      }, 2000);
+      // If we received thumbnails in the response, update the document
+      if (data.thumbnails && data.thumbnails.length > 0) {
+        updateDocument(documentId, { 
+          thumbnails: data.thumbnails,
+          pageCount: data.pageCount || data.thumbnails.length
+        });
+      }
+      
+      // We'll let the realtime subscription handle the status update
+      console.log("PDF conversion initiated successfully");
       
     } catch (error) {
       console.error("Error in PDF conversion:", error);
@@ -330,7 +367,7 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
       // Update the document status to failed
       updateDocument(documentId, { 
         status: "failed",
-        error: error instanceof Error ? error.message : "Unknown error"
+        processing_error: error instanceof Error ? error.message : "Unknown error"
       });
       
       // Update the status in the database
@@ -386,8 +423,7 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         message: `Starting text transcription for document ${documentId}`
       });
       
-      // Instead of calling the process-document function, let's directly update the transcription
-      // using data we already have from the document_pages table
+      // Get the document pages and combine their text content
       const { data: pages, error: pagesError } = await supabase
         .from("document_pages")
         .select("text_content")
@@ -424,15 +460,13 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         description: "Successfully transcribed document text",
       });
       
-      // Refresh the documents list
-      await fetchUserDocuments();
     } catch (error) {
       console.error("Error processing document text:", error);
       
       // Update the document status to failed
       updateDocument(documentId, { 
         status: "failed",
-        error: error instanceof Error ? error.message : "Unknown error"
+        processing_error: error instanceof Error ? error.message : "Unknown error"
       });
       
       // Update the status in the database
