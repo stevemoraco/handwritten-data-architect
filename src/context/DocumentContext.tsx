@@ -1,6 +1,6 @@
 
 import { createContext, useContext, useState, ReactNode, useEffect } from "react";
-import { Document } from "@/types";
+import { Document, DocumentSchema, ProcessingLog } from "@/types";
 import { toast } from "@/components/ui/use-toast";
 import { useAuth } from "@/context/AuthContext";
 import { v4 as uuidv4 } from "uuid";
@@ -8,6 +8,7 @@ import { supabase } from "@/integrations/supabase/client";
 
 interface DocumentContextProps {
   documents: Document[];
+  schemas: DocumentSchema[];
   isLoading: boolean;
   setDocuments: (documents: Document[]) => void;
   addDocument: (document: Document) => void;
@@ -15,18 +16,21 @@ interface DocumentContextProps {
   removeDocument: (id: string) => void;
   convertPdfToImages: (documentId: string) => Promise<void>;
   fetchUserDocuments: () => Promise<void>;
+  processDocumentText: (documentId: string) => Promise<void>;
 }
 
 const DocumentContext = createContext<DocumentContextProps | undefined>(undefined);
 
 export function DocumentProvider({ children }: { children: ReactNode }) {
   const [documents, setDocuments] = useState<Document[]>([]);
+  const [schemas, setSchemas] = useState<DocumentSchema[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const { user } = useAuth();
 
   useEffect(() => {
     if (user) {
       fetchUserDocuments();
+      fetchUserSchemas();
     }
   }, [user]);
 
@@ -85,6 +89,32 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         description: error instanceof Error ? error.message : "Failed to fetch documents",
         variant: "destructive",
       });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const fetchUserSchemas = async () => {
+    if (!user) return;
+
+    try {
+      setIsLoading(true);
+      const { data, error } = await supabase
+        .from("document_schemas")
+        .select("*")
+        .eq("organization_id", user.organizationId || '')
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        console.error("Error fetching schemas:", error);
+        return;
+      }
+
+      // Transform the database records to match the DocumentSchema type
+      const schemasList: DocumentSchema[] = data || [];
+      setSchemas(schemasList);
+    } catch (error) {
+      console.error("Error fetching schemas:", error);
     } finally {
       setIsLoading(false);
     }
@@ -202,17 +232,123 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // Add the processDocumentText function
+  const processDocumentText = async (documentId: string) => {
+    if (!user) {
+      toast({
+        title: "Authentication required",
+        description: "Please log in to process documents",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      
+      // Update document status
+      updateDocument(documentId, { status: "processing" });
+      
+      // Update the status in the database
+      await supabase
+        .from("documents")
+        .update({
+          status: "processing"
+        })
+        .eq("id", documentId);
+      
+      // Log the start of the process
+      await supabase.from("processing_logs").insert({
+        document_id: documentId,
+        action: "Text Transcription",
+        status: "success",
+        message: `Starting text transcription for document ${documentId}`
+      });
+      
+      // Call the process-document function
+      const { data, error } = await supabase.functions.invoke('process-document', {
+        body: { documentId, userId: user.id }
+      });
+      
+      if (error) {
+        throw new Error(`Failed to process document text: ${error.message}`);
+      }
+      
+      if (!data || !data.success) {
+        throw new Error(data?.error || "Unknown error in document processing");
+      }
+      
+      // Update the document with the transcription
+      updateDocument(documentId, { 
+        status: "processed",
+        transcription: data.transcription
+      });
+      
+      // Update the transcription in the database
+      await supabase
+        .from("documents")
+        .update({
+          status: "processed",
+          transcription: data.transcription
+        })
+        .eq("id", documentId);
+      
+      toast({
+        title: "Transcription complete",
+        description: "Successfully transcribed document text",
+      });
+      
+      // Refresh the documents list
+      await fetchUserDocuments();
+    } catch (error) {
+      console.error("Error processing document text:", error);
+      
+      // Update the document status to failed
+      updateDocument(documentId, { 
+        status: "failed",
+        error: error instanceof Error ? error.message : "Unknown error"
+      });
+      
+      // Update the status in the database
+      await supabase
+        .from("documents")
+        .update({
+          status: "failed",
+          processing_error: error instanceof Error ? error.message : "Unknown error"
+        })
+        .eq("id", documentId);
+      
+      // Log the error
+      await supabase.from("processing_logs").insert({
+        document_id: documentId,
+        action: "Text Transcription Error",
+        status: "error",
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
+      
+      toast({
+        title: "Transcription failed",
+        description: error instanceof Error ? error.message : "An unknown error occurred",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <DocumentContext.Provider
       value={{
         documents,
+        schemas,
         isLoading,
         setDocuments,
         addDocument,
         updateDocument,
         removeDocument,
         convertPdfToImages,
-        fetchUserDocuments
+        fetchUserDocuments,
+        processDocumentText
       }}
     >
       {children}

@@ -12,7 +12,7 @@ import { LoginModal } from "@/components/auth/LoginModal";
 
 export function Dashboard() {
   const navigate = useNavigate();
-  const { documents, schemas } = useDocuments();
+  const { documents, schemas = [] } = useDocuments();
   const { user } = useAuth();
   const [showLoginModal, setShowLoginModal] = React.useState(false);
   
