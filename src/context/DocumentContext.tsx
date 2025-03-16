@@ -334,11 +334,15 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         status: "success",
         message: `Starting PDF to images conversion process for document ${documentId}`
       });
+      
+      console.log(`Invoking pdf-to-images function for document: ${documentId}, user: ${user.id}`);
             
-      // Call the PDF to images function
+      // Call the PDF to images function with explicit error handling
       const { data, error } = await supabase.functions.invoke('pdf-to-images', {
         body: { documentId, userId: user.id }
       });
+      
+      console.log("Function invocation result:", { data, error });
             
       if (error) {
         console.error("Error invoking pdf-to-images function:", error);
@@ -346,8 +350,9 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
       }
       
       if (!data || !data.success) {
-        console.error("PDF conversion returned error:", data?.error || "Unknown error");
-        throw new Error(data?.error || "Unknown error in PDF conversion");
+        const errorMessage = data?.error || "Unknown error in PDF conversion";
+        console.error("PDF conversion returned error:", errorMessage);
+        throw new Error(errorMessage);
       }
       
       // If we received thumbnails in the response, update the document
@@ -385,6 +390,13 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
         action: "PDF Conversion Error",
         status: "error",
         message: error instanceof Error ? error.message : "Unknown error"
+      });
+      
+      // Show toast with error
+      toast({
+        title: "PDF Conversion Failed",
+        description: error instanceof Error ? error.message : "An unknown error occurred",
+        variant: "destructive",
       });
       
       throw error;

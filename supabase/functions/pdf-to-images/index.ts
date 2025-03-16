@@ -14,8 +14,11 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
+  console.log("PDF-to-images function called");
+  
   // Handle CORS preflight requests
   if (req.method === "OPTIONS") {
+    console.log("Handling CORS preflight request");
     return new Response(null, { headers: corsHeaders, status: 204 });
   }
 
@@ -24,9 +27,17 @@ serve(async (req) => {
 
   try {
     // Parse request body
-    const { documentId, userId } = await req.json();
+    const reqData = await req.json().catch(err => {
+      console.error("Error parsing request JSON:", err);
+      throw new Error("Invalid JSON body");
+    });
+    
+    const { documentId, userId } = reqData;
+
+    console.log(`Request received with documentId: ${documentId}, userId: ${userId}`);
 
     if (!documentId || !userId) {
+      console.error("Missing documentId or userId");
       return new Response(
         JSON.stringify({ 
           success: false, 
@@ -36,8 +47,6 @@ serve(async (req) => {
       );
     }
 
-    console.log(`Processing PDF to images for document: ${documentId}, user: ${userId}`);
-    
     // Create Supabase client
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     
@@ -67,14 +76,17 @@ serve(async (req) => {
       .single();
     
     if (docError) {
+      console.error("Document fetch error:", docError);
       throw new Error(`Document not found: ${docError.message}`);
     }
     
     if (document.type !== "pdf") {
+      console.error("Document is not a PDF, type:", document.type);
       throw new Error("Document is not a PDF");
     }
     
     if (!document.original_url) {
+      console.error("Document has no original URL");
       throw new Error("Document has no original URL");
     }
     
@@ -92,6 +104,7 @@ serve(async (req) => {
     }
     
     if (!fileData) {
+      console.error("No PDF file data found");
       throw new Error("No PDF file found");
     }
     
@@ -108,7 +121,16 @@ serve(async (req) => {
     
     // First, get the total number of pages
     const pdfArrayBuffer = await fileData.arrayBuffer();
-    const pageCount = (await convert(pdfArrayBuffer, { scale: 0.1, page: 1 })).length;
+    
+    // Use a try-catch here as the library might throw on malformed PDFs
+    let pageCount = 0;
+    try {
+      pageCount = (await convert(pdfArrayBuffer, { scale: 0.1, page: 1 })).length;
+      console.log(`PDF page count determined: ${pageCount} pages`);
+    } catch (pageCountError) {
+      console.error("Error getting page count:", pageCountError);
+      throw new Error(`Failed to get PDF page count: ${pageCountError.message}`);
+    }
     
     // Update document with page count immediately
     await supabase
@@ -118,7 +140,7 @@ serve(async (req) => {
       })
       .eq("id", documentId);
       
-    console.log(`PDF has ${pageCount} pages`);
+    console.log(`PDF has ${pageCount} pages, beginning conversion`);
     
     // Process each page one at a time
     const thumbnails = [];
