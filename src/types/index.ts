@@ -1,3 +1,4 @@
+
 export interface User {
   id: string;
   email: string;
@@ -40,6 +41,7 @@ export interface Document {
   userId: string;
   organizationId?: string;
   pipelineId?: string;
+  error?: string; // Add error property used in DocumentSelector
 }
 
 export interface DocumentSchema {

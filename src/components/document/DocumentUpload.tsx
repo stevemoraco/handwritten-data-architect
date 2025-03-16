@@ -200,16 +200,18 @@ export function DocumentUpload({
               console.error("Detailed upload error:", JSON.stringify({
                 message: uploadError.message,
                 name: uploadError.name,
-                details: uploadError.details,
-                hint: uploadError.hint,
-                code: uploadError.code
+                ...(typeof uploadError === 'object' && uploadError !== null ? {
+                  details: (uploadError as any).details,
+                  hint: (uploadError as any).hint,
+                  code: (uploadError as any).code
+                } : {})
               }, null, 2));
               
               await supabase
                 .from('documents')
                 .update({
                   status: 'failed',
-                  processing_error: `Upload failed: ${uploadError.message}${uploadError.hint ? ` (${uploadError.hint})` : ''}`,
+                  processing_error: `Upload failed: ${uploadError.message}${(uploadError as any).hint ? ` (${(uploadError as any).hint})` : ''}`,
                   updated_at: new Date().toISOString()
                 })
                 .eq('id', document.id);

@@ -319,14 +319,8 @@ export async function getProcessingLogs(documentId: string): Promise<ProcessingL
       return [];
     }
 
-    return (data || []).map(log => ({
-      id: log.id,
-      documentId: log.document_id,
-      action: log.action,
-      status: log.status as "success" | "error" | "warning",
-      message: log.message || "",
-      timestamp: log.created_at
-    }));
+    // Map directly to ProcessingLog interface
+    return data || [] as ProcessingLog[];
   } catch (error) {
     console.error("Error in getProcessingLogs:", error);
     return [];

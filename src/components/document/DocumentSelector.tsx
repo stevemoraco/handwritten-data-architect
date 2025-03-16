@@ -1,4 +1,3 @@
-
 import * as React from "react";
 import { Check, FileText, Loader2 } from "lucide-react";
 import { useDocuments } from "@/context/DocumentContext";
@@ -272,8 +271,8 @@ function DocumentCard({ document, isSelected, onSelect, disabled }: DocumentCard
         </div>
       </div>
       
-      {document.status === "failed" && document.error && (
-        <p className="mt-2 text-xs text-destructive">{document.error}</p>
+      {document.status === "failed" && document.processing_error && (
+        <p className="mt-2 text-xs text-destructive">{document.processing_error}</p>
       )}
     </Card>
   );
