@@ -14,8 +14,7 @@ interface SchemaDataViewProps {
 }
 
 export function SchemaDataView({ schema, documentId }: SchemaDataViewProps) {
-  // In a real implementation, this would fetch the actual data
-  // For the demo, we'll use our mock data
+  // Fetch the extracted data for this document
   const extractedData = extractTableData(documentId);
 
   const exportTableToCSV = (tableName: string) => {

@@ -1,3 +1,4 @@
+
 import * as React from "react";
 import { Check, FileText, Loader2 } from "lucide-react";
 import { useDocuments } from "@/context/DocumentContext";
@@ -28,7 +29,7 @@ interface DocumentSelectorProps {
 export function DocumentSelector({
   onSelectionChange,
   showTitle = true,
-  maxSelections = 5,
+  maxSelections,
   preselectedIds = [],
   className
 }: DocumentSelectorProps) {
@@ -46,6 +47,17 @@ export function DocumentSelector({
       setSelectedDocumentIds(preselectedIds);
     }
   }, [preselectedIds]);
+  
+  // Calculate document type counts
+  const statusCounts = React.useMemo(() => {
+    const counts = {
+      all: documents.length,
+      ready: documents.filter(doc => doc.status === "processed" && doc.thumbnails && doc.thumbnails.length > 0).length,
+      processed: documents.filter(doc => doc.status === "processed").length,
+      failed: documents.filter(doc => doc.status === "failed").length,
+    };
+    return counts;
+  }, [documents]);
 
   const toggleDocumentSelection = (documentId: string) => {
     setSelectedDocumentIds(prev => {
@@ -58,15 +70,15 @@ export function DocumentSelector({
         return newSelection;
       }
       
-      // If not selected and we haven't reached max, add it
-      if (prev.length < maxSelections) {
-        const newSelection = [...prev, documentId];
-        onSelectionChange(newSelection);
-        return newSelection;
+      // If not selected and we have a maxSelections limit, check it
+      if (maxSelections && prev.length >= maxSelections) {
+        return prev; // Don't change selection if we've reached the limit
       }
       
-      // Otherwise, don't change selection
-      return prev;
+      // Add the selection
+      const newSelection = [...prev, documentId];
+      onSelectionChange(newSelection);
+      return newSelection;
     });
   };
 
@@ -83,7 +95,7 @@ export function DocumentSelector({
     });
   }, [documents, filterStatus]);
 
-  const canSelectMore = selectedDocumentIds.length < maxSelections;
+  const canSelectMore = !maxSelections || selectedDocumentIds.length < maxSelections;
 
   if (isLoading) {
     return (
@@ -114,7 +126,7 @@ export function DocumentSelector({
           <h3 className="text-sm font-medium flex items-center gap-2">
             <FileText className="h-4 w-4" />
             <span>Select Documents</span>
-            {maxSelections > 1 && (
+            {maxSelections && (
               <Badge variant="outline" className="ml-2">
                 {selectedDocumentIds.length}/{maxSelections} selected
               </Badge>
@@ -123,16 +135,16 @@ export function DocumentSelector({
         )}
 
         <Select value={filterStatus} onValueChange={setFilterStatus}>
-          <SelectTrigger className="w-[150px]">
+          <SelectTrigger className="w-[180px]">
             <SelectValue placeholder="Filter documents" />
           </SelectTrigger>
           <SelectContent>
             <SelectGroup>
               <SelectLabel>Filter by status</SelectLabel>
-              <SelectItem value="all">All documents</SelectItem>
-              <SelectItem value="ready">Ready to process</SelectItem>
-              <SelectItem value="processed">Processed</SelectItem>
-              <SelectItem value="failed">Failed</SelectItem>
+              <SelectItem value="all">All documents ({statusCounts.all})</SelectItem>
+              <SelectItem value="ready">Ready to process ({statusCounts.ready})</SelectItem>
+              <SelectItem value="processed">Processed ({statusCounts.processed})</SelectItem>
+              <SelectItem value="failed">Failed ({statusCounts.failed})</SelectItem>
             </SelectGroup>
           </SelectContent>
         </Select>

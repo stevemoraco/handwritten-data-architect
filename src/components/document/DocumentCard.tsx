@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Document } from "@/types";
-import { FileIcon, FilePenIcon, FileTextIcon, RotateCw, Trash2, FileImage, ExternalLink } from "lucide-react";
+import { FileIcon, FilePenIcon, FileTextIcon, RotateCw, Trash2, FileImage, ExternalLink, Eye } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { useDocuments } from "@/context/DocumentContext";
@@ -181,6 +181,16 @@ export function DocumentCard({
       <Separator className="mt-4" />
       
       <CardFooter className="p-3 flex gap-2 flex-wrap text-xs">
+        {/* View button */}
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 text-xs"
+          onClick={onView}
+        >
+          <Eye className="h-3 w-3 mr-1" /> View
+        </Button>
+        
         {/* Conversion button - always show for PDFs, or show retry for failed */}
         {(document.type === "pdf" || document.status === "failed") && (
           <Button
@@ -198,12 +208,12 @@ export function DocumentCard({
             ) : document.thumbnails && document.thumbnails.length > 0 ? (
               <>
                 <RotateCw className="h-3 w-3 mr-1" />
-                Retry Conversion
+                Retry
               </>
             ) : (
               <>
                 <FileImage className="h-3 w-3 mr-1" />
-                Convert to Images
+                Convert
               </>
             )}
           </Button>
@@ -225,15 +235,28 @@ export function DocumentCard({
           ) : document.transcription ? (
             <>
               <RotateCw className="h-3 w-3 mr-1" />
-              Reprocess Text
+              Reprocess
             </>
           ) : (
             <>
               <FileTextIcon className="h-3 w-3 mr-1" />
-              Process Text
+              Process
             </>
           )}
         </Button>
+        
+        {/* Process in pipeline button */}
+        {document.status === "processed" && onProcess && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 text-xs"
+            onClick={onProcess}
+          >
+            <FileImage className="h-3 w-3 mr-1" />
+            Process
+          </Button>
+        )}
         
         {/* View original document button */}
         <Button
@@ -244,16 +267,6 @@ export function DocumentCard({
         >
           <ExternalLink className="h-3 w-3 mr-1" />
           View PDF
-        </Button>
-        
-        {/* View details button */}
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-8 text-xs"
-          onClick={onView}
-        >
-          View Details
         </Button>
         
         {/* Delete button */}

@@ -1,143 +1,85 @@
 
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { AppLayout } from "./components/layout/AppLayout";
-import Index from "./pages/Index";
-import NotFound from "./pages/NotFound";
-import Features from "./pages/Features";
-import Pricing from "./pages/Pricing";
-import API from "./pages/API";
-import Contact from "./pages/Contact";
-import Documentation from "./pages/Documentation";
-import HelpCenter from "./pages/HelpCenter";
-import Security from "./pages/Security";
-import SOC2 from "./pages/SOC2";
-import Terms from "./pages/Terms";
-import Privacy from "./pages/Privacy";
-import DocumentProcess from "./pages/DocumentProcess";
-import AuthPage from "./pages/auth/AuthPage";
-import AuthCallback from "./pages/auth/AuthCallback";
-import { Toaster } from "./components/ui/toaster";
-import { AuthProvider } from "./context/AuthContext";
-import { UploadProvider } from "./context/UploadContext";
-import { DocumentProvider } from "./context/DocumentContext";
+import { Suspense, lazy } from "react";
+import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { ThemeProvider } from "@/components/theme-provider";
+import { Toaster } from "@/components/ui/toaster";
+import { Toaster as SonnerToaster } from "@/components/ui/sonner";
+import { AuthProvider } from "@/context/AuthContext";
+import { DocumentProvider } from "@/context/DocumentContext";
+import { UploadProvider } from "@/context/UploadContext";
+import AppLayout from "@/components/layout/AppLayout";
 
-const queryClient = new QueryClient();
+// Lazy-loaded pages
+const IndexPage = lazy(() => import("@/pages/Index"));
+const AuthCallbackPage = lazy(() => import("@/pages/auth/AuthCallback"));
+const AuthPage = lazy(() => import("@/pages/auth/AuthPage"));
+const FeaturesPage = lazy(() => import("@/pages/Features"));
+const PricingPage = lazy(() => import("@/pages/Pricing"));
+const DocumentationPage = lazy(() => import("@/pages/Documentation"));
+const APIPage = lazy(() => import("@/pages/API"));
+const ContactPage = lazy(() => import("@/pages/Contact"));
+const HelpCenterPage = lazy(() => import("@/pages/HelpCenter"));
+const SecurityPage = lazy(() => import("@/pages/Security"));
+const SOC2Page = lazy(() => import("@/pages/SOC2"));
+const PrivacyPage = lazy(() => import("@/pages/Privacy"));
+const TermsPage = lazy(() => import("@/pages/Terms"));
+const NotFoundPage = lazy(() => import("@/pages/NotFound"));
+const DocumentProcessPage = lazy(() => import("@/pages/DocumentProcess"));
+const DocumentsPage = lazy(() => import("@/pages/Documents"));
+const PipelinesPage = lazy(() => import("@/pages/Pipelines"));
+const SettingsPage = lazy(() => import("@/pages/Settings"));
 
 function App() {
   return (
-    <BrowserRouter>
-      <QueryClientProvider client={queryClient}>
-        <AuthProvider>
+    <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme">
+      <AuthProvider>
+        <DocumentProvider>
           <UploadProvider>
-            <DocumentProvider>
-              <Routes>
-                <Route path="/auth" element={<AuthPage />} />
-                <Route path="/auth/callback" element={<AuthCallback />} />
-                <Route
-                  path="/"
-                  element={
-                    <AppLayout>
-                      <Index />
-                    </AppLayout>
-                  }
-                />
-                <Route
-                  path="/features"
-                  element={
-                    <AppLayout>
-                      <Features />
-                    </AppLayout>
-                  }
-                />
-                <Route
-                  path="/pricing"
-                  element={
-                    <AppLayout>
-                      <Pricing />
-                    </AppLayout>
-                  }
-                />
-                <Route
-                  path="/api"
-                  element={
-                    <AppLayout>
-                      <API />
-                    </AppLayout>
-                  }
-                />
-                <Route
-                  path="/contact"
-                  element={
-                    <AppLayout>
-                      <Contact />
-                    </AppLayout>
-                  }
-                />
-                <Route
-                  path="/documentation"
-                  element={
-                    <AppLayout>
-                      <Documentation />
-                    </AppLayout>
-                  }
-                />
-                <Route
-                  path="/help"
-                  element={
-                    <AppLayout>
-                      <HelpCenter />
-                    </AppLayout>
-                  }
-                />
-                <Route
-                  path="/security"
-                  element={
-                    <AppLayout>
-                      <Security />
-                    </AppLayout>
-                  }
-                />
-                <Route
-                  path="/soc2"
-                  element={
-                    <AppLayout>
-                      <SOC2 />
-                    </AppLayout>
-                  }
-                />
-                <Route
-                  path="/terms"
-                  element={
-                    <AppLayout>
-                      <Terms />
-                    </AppLayout>
-                  }
-                />
-                <Route
-                  path="/privacy"
-                  element={
-                    <AppLayout>
-                      <Privacy />
-                    </AppLayout>
-                  }
-                />
-                <Route
-                  path="/process"
-                  element={
-                    <AppLayout>
-                      <DocumentProcess />
-                    </AppLayout>
-                  }
-                />
-                <Route path="*" element={<NotFound />} />
-              </Routes>
+            <BrowserRouter>
+              <Suspense 
+                fallback={
+                  <div className="flex items-center justify-center h-screen">
+                    <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+                  </div>
+                }
+              >
+                <Routes>
+                  <Route path="/" element={<AppLayout />}>
+                    {/* Public routes */}
+                    <Route index element={<IndexPage />} />
+                    <Route path="auth" element={<AuthPage />} />
+                    <Route path="features" element={<FeaturesPage />} />
+                    <Route path="pricing" element={<PricingPage />} />
+                    <Route path="docs" element={<DocumentationPage />} />
+                    <Route path="api" element={<APIPage />} />
+                    <Route path="contact" element={<ContactPage />} />
+                    <Route path="help" element={<HelpCenterPage />} />
+                    <Route path="security" element={<SecurityPage />} />
+                    <Route path="soc2" element={<SOC2Page />} />
+                    <Route path="privacy" element={<PrivacyPage />} />
+                    <Route path="terms" element={<TermsPage />} />
+                    
+                    {/* Protected routes */}
+                    <Route path="process" element={<DocumentProcessPage />} />
+                    <Route path="documents" element={<DocumentsPage />} />
+                    <Route path="pipelines" element={<PipelinesPage />} />
+                    <Route path="settings" element={<SettingsPage />} />
+                    
+                    {/* Auth callback */}
+                    <Route path="auth/callback" element={<AuthCallbackPage />} />
+                    
+                    {/* 404 */}
+                    <Route path="*" element={<NotFoundPage />} />
+                  </Route>
+                </Routes>
+              </Suspense>
               <Toaster />
-            </DocumentProvider>
+              <SonnerToaster />
+            </BrowserRouter>
           </UploadProvider>
-        </AuthProvider>
-      </QueryClientProvider>
-    </BrowserRouter>
+        </DocumentProvider>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }
 
