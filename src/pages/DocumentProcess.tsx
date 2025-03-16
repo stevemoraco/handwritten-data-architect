@@ -350,7 +350,7 @@ export default function DocumentProcess() {
           const transcription = await transcribeDocument(doc.id);
           
           if (!transcription) {
-            throw new Error("Transcription failed");
+            throw new Error("Transcription failed - no content returned");
           }
           
           updateDocumentStatus(doc.id, "completed", doc.pageCount);
@@ -365,7 +365,9 @@ export default function DocumentProcess() {
           
         } catch (error) {
           console.error(`Error transcribing document ${doc.id}:`, error);
-          updateDocumentStatus(doc.id, "failed", undefined, error instanceof Error ? error.message : "Transcription failed");
+          const errorMessage = error instanceof Error ? error.message : "Transcription failed";
+          updateDocumentStatus(doc.id, "failed", undefined, errorMessage);
+          updateStepStatus("Document Transcription", "failed", undefined, errorMessage);
           throw error;
         }
       }
@@ -377,7 +379,8 @@ export default function DocumentProcess() {
       
     } catch (error) {
       console.error("Error in transcribeDocuments:", error);
-      updateStepStatus("Document Transcription", "failed", undefined, error instanceof Error ? error.message : "Unknown error");
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      updateStepStatus("Document Transcription", "failed", undefined, errorMessage);
       throw error;
     }
   };

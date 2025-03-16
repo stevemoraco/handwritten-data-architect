@@ -34,12 +34,18 @@ export const processWithGemini = async (prompt: GeminiPrompt): Promise<string> =
       };
     }
     
+    console.log(`Calling edge function ${endpoint} with operation ${operation}`, body);
+    
     // Call the edge function
     const response = await supabase.functions.invoke(endpoint, { body });
     
     if (!response.data.success) {
-      throw new Error(response.data.error || `Unknown error in ${operation}`);
+      const errorMessage = response.data.error || `Unknown error in ${operation}`;
+      console.error(`Error in ${operation}:`, errorMessage);
+      throw new Error(errorMessage);
     }
+    
+    console.log(`Received successful response from ${operation}`, response.data);
     
     // Return the result based on the operation
     if (operation === 'transcribe') {
@@ -53,7 +59,7 @@ export const processWithGemini = async (prompt: GeminiPrompt): Promise<string> =
     return "Processing complete";
   } catch (error) {
     console.error("Error processing with Gemini:", error);
-    return `Error: ${error instanceof Error ? error.message : "Unknown error occurred"}`;
+    throw error;
   }
 };
 

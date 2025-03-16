@@ -194,22 +194,46 @@ async function transcribeDocument(document, pages, apiKey, supabase) {
   
   // Prepare image parts for the Gemini model
   const imageParts = await Promise.all(pages.map(async (page) => {
-    // Get image data
-    const imageUrl = page.image_url;
-    const response = await fetch(imageUrl);
-    const imageBlob = await response.blob();
-    
-    // Convert blob to base64
-    const buffer = await imageBlob.arrayBuffer();
-    const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
-    
-    return {
-      inlineData: {
-        mimeType: "image/png",
-        data: base64
+    try {
+      // Get image data
+      const imageUrl = page.image_url;
+      if (!imageUrl) {
+        console.warn(`No image URL found for page ${page.page_number}`);
+        return null;
       }
-    };
+      
+      console.log(`Fetching image for page ${page.page_number}: ${imageUrl}`);
+      const response = await fetch(imageUrl);
+      
+      if (!response.ok) {
+        console.error(`Failed to fetch image for page ${page.page_number}: ${response.status} ${response.statusText}`);
+        throw new Error(`Failed to fetch image for page ${page.page_number}: ${response.status} ${response.statusText}`);
+      }
+      
+      const imageBlob = await response.blob();
+      
+      // Convert blob to base64
+      const buffer = await imageBlob.arrayBuffer();
+      const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+      
+      return {
+        inlineData: {
+          mimeType: "image/png",
+          data: base64
+        }
+      };
+    } catch (error) {
+      console.error(`Error preparing image for page ${page.page_number}:`, error);
+      return null;
+    }
   }));
+  
+  // Filter out any null values from failed image fetches
+  const validImageParts = imageParts.filter(part => part !== null);
+  
+  if (validImageParts.length === 0) {
+    throw new Error("No valid images could be prepared for transcription");
+  }
   
   // Update progress to indicate preparation complete
   await supabase
@@ -249,7 +273,7 @@ Important instructions:
 
 The output should be a complete, accurate transcription that could be used as a text-only reference for the original document.`
           },
-          ...imageParts
+          ...validImageParts
         ]
       }
     ],
@@ -261,49 +285,87 @@ The output should be a complete, accurate transcription that could be used as a 
     }
   };
   
-  // Call Gemini API
-  const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key=" + apiKey, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(prompt),
-  });
-  
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error("Gemini API error:", errorText);
-    throw new Error(`Gemini API returned error: ${response.status} ${response.statusText}`);
+  try {
+    console.log(`Calling Gemini API with ${validImageParts.length} images`);
+    
+    // Call Gemini API with the updated model
+    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=" + apiKey, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(prompt),
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("Gemini API error:", errorText);
+      throw new Error(`Gemini API returned error: ${response.status} ${response.statusText} - ${errorText}`);
+    }
+    
+    const result = await response.json();
+    console.log("Gemini API response received:", JSON.stringify(result).substring(0, 200) + "...");
+    
+    if (!result.candidates || result.candidates.length === 0) {
+      throw new Error("Gemini API returned no candidates");
+    }
+    
+    if (result.candidates[0].finishReason === "SAFETY") {
+      throw new Error("Content was filtered due to safety concerns");
+    }
+    
+    if (!result.candidates[0].content || !result.candidates[0].content.parts || result.candidates[0].content.parts.length === 0) {
+      throw new Error("Gemini API returned empty content");
+    }
+    
+    // Extract the transcription text
+    const transcription = result.candidates[0].content.parts[0].text;
+    
+    if (!transcription || transcription.trim() === "") {
+      throw new Error("Gemini API returned empty transcription text");
+    }
+    
+    // Update the document with the transcription
+    await supabase
+      .from("documents")
+      .update({
+        transcription: transcription,
+        processing_progress: 100,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", document.id);
+    
+    // Log completion
+    await supabase.from("processing_logs").insert({
+      document_id: document.id,
+      action: "Gemini Transcription Complete",
+      status: "success",
+      message: "Successfully transcribed document using Gemini API",
+    });
+    
+    return { transcription };
+  } catch (error) {
+    console.error("Error in Gemini transcription:", error);
+    
+    // Log the specific error
+    await supabase.from("processing_logs").insert({
+      document_id: document.id,
+      action: "Gemini Transcription Error",
+      status: "error",
+      message: error.message || "Unknown error in transcription",
+    });
+    
+    // Update document status
+    await supabase
+      .from("documents")
+      .update({
+        processing_error: error.message || "Unknown error in transcription",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", document.id);
+    
+    throw error;
   }
-  
-  const result = await response.json();
-  
-  if (!result.candidates || result.candidates.length === 0 || !result.candidates[0].content) {
-    throw new Error("Gemini API returned no content");
-  }
-  
-  // Extract the transcription text
-  const transcription = result.candidates[0].content.parts[0].text;
-  
-  // Update the document with the transcription
-  await supabase
-    .from("documents")
-    .update({
-      transcription: transcription,
-      processing_progress: 100,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", document.id);
-  
-  // Log completion
-  await supabase.from("processing_logs").insert({
-    document_id: document.id,
-    action: "Gemini Transcription Complete",
-    status: "success",
-    message: "Successfully transcribed document using Gemini API",
-  });
-  
-  return { transcription };
 }
 
 // Function to generate a schema for multiple documents

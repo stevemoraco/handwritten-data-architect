@@ -1,14 +1,14 @@
-
 import * as React from "react";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { AIProcessingStep } from "@/types";
-import { CheckIcon, Clock, AlertCircle, RotateCw, ArrowRight, FileText, Table, Image, FileCode } from "lucide-react";
+import { CheckIcon, Clock, AlertCircle, RotateCw, ArrowRight, FileText, Table, Image, FileCode, ExternalLink } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 interface PageDetail {
   pageNumber: number;
@@ -60,7 +60,6 @@ export function ProcessingSteps({
   const [openSteps, setOpenSteps] = React.useState<string[]>([]);
   
   React.useEffect(() => {
-    // Automatically expand steps that are in progress
     const inProgressStepIds = steps
       .filter(step => step.status === "in_progress")
       .map(step => step.id);
@@ -166,7 +165,13 @@ export function ProcessingSteps({
                   )}
                   
                   {step.error && (
-                    <p className="text-sm text-destructive">{step.error}</p>
+                    <Alert variant="destructive" className="mt-2">
+                      <AlertCircle className="h-4 w-4" />
+                      <AlertTitle>Processing Error</AlertTitle>
+                      <AlertDescription className="mt-1">
+                        <div className="text-sm break-words whitespace-pre-wrap">{step.error}</div>
+                      </AlertDescription>
+                    </Alert>
                   )}
 
                   <CollapsibleContent>
