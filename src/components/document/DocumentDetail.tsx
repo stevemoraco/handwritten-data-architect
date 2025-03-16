@@ -21,13 +21,16 @@ export function DocumentDetail({ document, onProcess, logs = [] }: DocumentDetai
 
   const handleViewOriginal = (url: string) => {
     try {
-      // Make sure we're viewing the original.pdf file for PDFs
+      // For PDFs, always use the fixed filename 'original.pdf'
       let finalUrl = url;
-      if (document.type === "pdf" && !url.endsWith("original.pdf")) {
-        // Extract the base path without the filename
+      if (document.type === "pdf") {
+        // Get the base URL path without the filename
         const urlParts = url.split('/');
-        urlParts.pop(); // Remove the last part (filename)
-        finalUrl = `${urlParts.join('/')}/original.pdf`;
+        if (urlParts.length > 0) {
+          urlParts.pop(); // Remove the filename
+          finalUrl = `${urlParts.join('/')}/original.pdf`;
+          console.log("Modified URL for PDF:", finalUrl);
+        }
       }
       
       window.open(finalUrl, "_blank");

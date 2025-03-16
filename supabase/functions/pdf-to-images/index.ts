@@ -1,4 +1,3 @@
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.8.0";
 import { convert } from "https://esm.sh/pdf-img-convert@1.2.1";
@@ -92,11 +91,14 @@ serve(async (req) => {
     
     console.log(`Document found: ${document.name}, getting PDF...`);
     
-    // Get the PDF file - FIX: Use 'original.pdf' as the fixed filename instead of the original filename
+    // Always use the fixed filename 'original.pdf' for PDFs
+    const pdfPath = `${userId}/${documentId}/original.pdf`;
+    console.log(`Downloading PDF from path: ${pdfPath}`);
+    
     const { data: fileData, error: fileError } = await supabase
       .storage
       .from("document_files")
-      .download(`${userId}/${documentId}/original.pdf`);
+      .download(pdfPath);
     
     if (fileError) {
       console.error("Error downloading PDF:", fileError);

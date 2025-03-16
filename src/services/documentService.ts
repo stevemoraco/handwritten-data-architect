@@ -1,4 +1,3 @@
-
 import { v4 as uuidv4 } from "uuid";
 import { supabase } from "@/integrations/supabase/client";
 import { Document, DocumentData, ProcessingLog, UploadProgress } from "@/types";
@@ -91,10 +90,12 @@ export async function uploadDocument(
       });
     }
 
-    // Upload the file to the document_files bucket - FIX: Use 'original.pdf' as the fixed filename
+    // Important fix: Always use a fixed filename for PDFs to prevent issues with spaces
     const uploadPath = fileType === 'pdf' 
       ? `${userId}/${id}/original.pdf` 
       : `${userId}/${id}/${filename}`;
+    
+    console.log(`Uploading file to path: ${uploadPath}`);
       
     const { error: uploadError } = await supabase.storage
       .from("document_files")
@@ -120,7 +121,7 @@ export async function uploadDocument(
       });
     }
 
-    // Get the public URL - FIX: Use the same path we uploaded to
+    // Use the same path we uploaded to for the public URL
     const { data: publicUrlData } = supabase.storage
       .from("document_files")
       .getPublicUrl(uploadPath);
@@ -160,9 +161,13 @@ export async function uploadDocument(
     // Start PDF to images conversion
     if (fileType === "pdf") {
       try {
+        console.log(`Invoking PDF-to-images function for document: ${id}`);
+        
         const response = await supabase.functions.invoke('pdf-to-images', {
           body: { documentId: id, userId }
         });
+
+        console.log('PDF-to-images response:', response);
 
         if (!response.data || !response.data.success) {
           throw new Error(response.data?.error || "Unknown error in PDF conversion");
