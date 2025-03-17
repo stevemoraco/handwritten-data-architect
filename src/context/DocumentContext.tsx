@@ -57,6 +57,7 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setIsLoading(true);
     
     try {
+      // Fetch documents
       const { data, error } = await supabase
         .from("documents")
         .select("*")
@@ -72,6 +73,8 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         return;
       }
       
+      console.log("Fetched documents:", data.length);
+      
       // Process document data
       const processedDocs: Document[] = await Promise.all(
         data.map(async (doc) => {
@@ -81,21 +84,42 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             .select("image_url")
             .eq("document_id", doc.id)
             .order("page_number", { ascending: true });
-            
+          
+          console.log(`Document ${doc.id} page fetch:`, !pagesError ? "success" : "error", pages?.length || 0);
+          
           const thumbnails = !pagesError && pages ? pages.map(page => page.image_url).filter(Boolean) : [];
+          
+          // Try to get the document URL if not set
+          let docUrl = doc.original_url || doc.url || "";
+          if (!docUrl && doc.user_id) {
+            try {
+              // Try with ID-based path
+              const pathWithId = `${doc.user_id}/${doc.id}/original${doc.type === 'pdf' ? '.pdf' : ''}`;
+              const { data: urlData } = supabase.storage
+                .from("document_files")
+                .getPublicUrl(pathWithId);
+              
+              if (urlData?.publicUrl) {
+                docUrl = urlData.publicUrl;
+              }
+            } catch (e) {
+              console.error("Error getting document URL:", e);
+            }
+          }
           
           return {
             id: doc.id,
             name: doc.name,
             type: doc.type as "pdf" | "image",
             status: doc.status as "uploaded" | "processing" | "processed" | "failed",
-            url: doc.original_url || "",
+            url: docUrl,
+            original_url: doc.original_url || "",
             thumbnails,
             pageCount: doc.page_count || 0,
             createdAt: doc.created_at,
             updatedAt: doc.updated_at,
             userId: doc.user_id,
-            organizationId: null, // Fixed: Use null instead of doc.organization_id which doesn't exist
+            organizationId: null, // Use null instead of doc.organization_id which doesn't exist
             pipelineId: doc.pipeline_id,
             processingError: doc.processing_error,
             processing_progress: doc.processing_progress,
@@ -107,6 +131,11 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setDocuments(processedDocs);
       setFetchError(null);
       setErrorShown(false);
+      
+      console.log("Processed documents:", processedDocs.length);
+      processedDocs.forEach(doc => {
+        console.log(`Document ${doc.id} "${doc.name}": ${doc.thumbnails.length} thumbnails`);
+      });
     } catch (error) {
       console.error("Error fetching documents:", error);
       setFetchError(error instanceof Error ? error : new Error("Unknown error fetching documents"));
@@ -168,7 +197,7 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       
       // Call the edge function to convert PDF to images
       const { data, error } = await supabase.functions.invoke('pdf-to-images', {
-        body: { documentId }
+        body: { documentId, userId: user.id }
       });
       
       if (error) {

@@ -32,9 +32,12 @@ serve(async (req) => {
 
     // Get documentId and userId from request body
     const { documentId, userId } = await req.json()
-    if (!documentId || !userId) {
-      throw new Error('Missing documentId or userId in request body')
+    if (!documentId) {
+      throw new Error('Missing documentId in request body')
     }
+
+    // Log start of processing
+    console.log(`Starting PDF processing for document: ${documentId}, user: ${userId || 'unknown'}`)
 
     // Process the PDF
     const result = await processPdf(supabase, userId, documentId);
@@ -71,6 +74,14 @@ async function processPdf(supabase, userId, documentId) {
       throw new Error(`Failed to get document: ${docError?.message || "Document not found"}`);
     }
     
+    // Use passed userId if document.user_id is missing
+    const actualUserId = document.user_id || userId;
+    if (!actualUserId) {
+      throw new Error("No user ID available for document processing");
+    }
+
+    console.log(`Document found: ${document.name}, user: ${actualUserId}`);
+    
     // Log processing started
     await supabase.from("processing_logs").insert({
       document_id: documentId,
@@ -82,7 +93,10 @@ async function processPdf(supabase, userId, documentId) {
     // Update document status
     await supabase
       .from("documents")
-      .update({ status: 'processing' })
+      .update({ 
+        status: 'processing',
+        processing_progress: 5
+      })
       .eq("id", documentId);
     
     // Initialize variables
@@ -126,7 +140,7 @@ async function processPdf(supabase, userId, documentId) {
     
     // Try storage API with ID-based path
     if (!fileData) {
-      const idBasedPath = `${document.user_id || userId}/${documentId}/original.pdf`;
+      const idBasedPath = `${actualUserId}/${documentId}/original.pdf`;
       console.log(`Trying to download using ID-based path: ${idBasedPath}`);
       
       try {
@@ -163,7 +177,7 @@ async function processPdf(supabase, userId, documentId) {
     // Try storage API with name-based path
     if (!fileData) {
       const encodedFilename = encodeURIComponent(document.name);
-      const nameBasedPath = `${document.user_id || userId}/uploads/${encodedFilename}`;
+      const nameBasedPath = `${actualUserId}/uploads/${encodedFilename}`;
       console.log(`Trying to download using name-based path: ${nameBasedPath}`);
       
       try {
@@ -203,16 +217,56 @@ async function processPdf(supabase, userId, documentId) {
 
     console.log("PDF file downloaded successfully");
 
+    // Update progress
+    await supabase
+      .from("documents")
+      .update({ processing_progress: 20 })
+      .eq("id", documentId);
+
     // Load the PDF document
     console.log("Loading the PDF document...");
     const pdf = await pdfjs.getDocument({ data: fileData }).promise;
     pageCount = pdf.numPages;
     console.log(`PDF loaded with ${pageCount} pages`);
 
+    // Update progress
+    await supabase
+      .from("documents")
+      .update({ 
+        processing_progress: 30,
+        page_count: pageCount 
+      })
+      .eq("id", documentId);
+
     // Generate thumbnails for each page
     console.log("Generating thumbnails...");
+    const pageFolderPath = `${actualUserId}/${documentId}/pages`;
+    
+    // Ensure the pages folder exists
+    try {
+      // Create folder by uploading a dummy file
+      const { error: folderError } = await supabase.storage
+        .from("document_files")
+        .upload(`${pageFolderPath}/.keep`, new Uint8Array([]), {
+          upsert: true
+        });
+      
+      if (folderError) {
+        console.log(`Warning: Could not ensure pages folder exists: ${folderError.message}`);
+      }
+    } catch (error) {
+      console.log(`Error ensuring pages folder: ${error.message}`);
+    }
+
     for (let i = 1; i <= pageCount; i++) {
       try {
+        // Update progress
+        const progress = 30 + Math.floor((i / pageCount) * 60);
+        await supabase
+          .from("documents")
+          .update({ processing_progress: progress })
+          .eq("id", documentId);
+        
         const page = await pdf.getPage(i);
         const viewport = page.getViewport({ scale: 0.2 });
         const canvas = new OffscreenCanvas(viewport.width, viewport.height);
@@ -231,8 +285,9 @@ async function processPdf(supabase, userId, documentId) {
         const arrayBuffer = await blob.arrayBuffer();
         
         // Save the page image to storage
-        const pagePath = `${document.user_id || userId}/${documentId}/pages/page-${i}.jpg`;
+        const pagePath = `${pageFolderPath}/page-${i}.jpg`;
         
+        console.log(`Uploading page ${i} image to: ${pagePath}`);
         const { error: pageUploadError } = await supabase.storage
           .from("document_files")
           .upload(pagePath, arrayBuffer, {
@@ -260,7 +315,9 @@ async function processPdf(supabase, userId, documentId) {
             image_url: pageUrlData.publicUrl
           }, { onConflict: 'document_id,page_number' });
           
-          console.log(`Page ${i} processed and saved`);
+          console.log(`Page ${i} processed and saved with URL: ${pageUrlData.publicUrl}`);
+        } else {
+          console.error(`Failed to get public URL for page ${i}`);
         }
       } catch (thumbnailError) {
         console.error(`Error generating thumbnail for page ${i}:`, thumbnailError);
@@ -268,7 +325,7 @@ async function processPdf(supabase, userId, documentId) {
       }
     }
 
-    console.log("Thumbnails generated successfully");
+    console.log(`Generated ${thumbnails.length} thumbnails successfully`);
 
     // Update the document in the database with thumbnails and page count
     console.log("Updating document in database...");
@@ -276,7 +333,8 @@ async function processPdf(supabase, userId, documentId) {
       .from("documents")
       .update({
         page_count: pageCount,
-        status: 'processed'
+        status: 'processed',
+        processing_progress: 100
       })
       .eq("id", documentId);
 
@@ -289,7 +347,7 @@ async function processPdf(supabase, userId, documentId) {
       document_id: documentId,
       action: "PDF Processing",
       status: "success",
-      message: `Successfully processed ${pageCount} pages`
+      message: `Successfully processed ${pageCount} pages with ${thumbnails.length} thumbnails`
     });
 
     console.log("Document updated successfully");

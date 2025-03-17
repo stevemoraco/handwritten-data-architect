@@ -1,4 +1,3 @@
-
 import * as React from "react";
 import { Document } from "@/types";
 import { Card, CardContent } from "@/components/ui/card";
@@ -54,6 +53,10 @@ export function SimpleDocumentList({
     }
   };
 
+  const handleViewDocument = (documentId: string) => {
+    navigate(`/document/${documentId}`);
+  };
+
   const allSelected = documents.length > 0 && selectedIds.length === documents.length;
   
   const getStatusColor = (status: string) => {
@@ -80,10 +83,6 @@ export function SimpleDocumentList({
       default:
         return <UploadIcon className="h-3 w-3" />;
     }
-  };
-
-  const handleViewDocument = (documentId: string) => {
-    navigate(`/document/${documentId}`);
   };
 
   if (isLoading) {
@@ -156,6 +155,25 @@ export function SimpleDocumentList({
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-lg font-medium">Your Documents</h2>
           <div className="flex items-center gap-2">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="h-8 text-xs"
+              onClick={handleRetry}
+              disabled={isRetrying}
+            >
+              {isRetrying ? (
+                <>
+                  <RefreshCw className="h-3 w-3 mr-2 animate-spin" />
+                  Refreshing...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="h-3 w-3 mr-2" />
+                  Refresh
+                </>
+              )}
+            </Button>
             <Checkbox 
               id="select-all" 
               checked={allSelected}
@@ -187,10 +205,7 @@ export function SimpleDocumentList({
                 onCheckedChange={(checked) => handleToggleDocument(document.id, !!checked)}
                 className="mt-1"
               />
-              <div 
-                className="flex-1 min-w-0 cursor-pointer" 
-                onClick={() => handleViewDocument(document.id)}
-              >
+              <div className="flex-1 min-w-0">
                 <div className="flex items-start justify-between gap-2">
                   <label 
                     htmlFor={`doc-${document.id}`}
@@ -226,6 +241,7 @@ export function SimpleDocumentList({
                     )}
                   </div>
                 </div>
+                
                 <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
                   <span>{document.type.toUpperCase()}</span>
                   <span className="h-1 w-1 rounded-full bg-muted-foreground/50"></span>
@@ -233,11 +249,50 @@ export function SimpleDocumentList({
                   <span className="h-1 w-1 rounded-full bg-muted-foreground/50"></span>
                   <span>{document.createdAt ? formatDistanceToNow(new Date(document.createdAt), { addSuffix: true }) : 'Unknown date'}</span>
                 </div>
-                {document.status === 'failed' && document.processing_error && (
+                
+                {document.status === 'failed' && document.processingError && (
                   <div className="mt-1 text-xs text-destructive">
-                    Error: {document.processing_error}
+                    Error: {document.processingError}
                   </div>
                 )}
+                
+                {document.thumbnails && document.thumbnails.length > 0 && (
+                  <div className="mt-2 flex gap-2 overflow-x-auto pb-2">
+                    {document.thumbnails.slice(0, 3).map((thumbnail, index) => (
+                      <div key={index} className="shrink-0 w-16 h-20 border rounded-sm overflow-hidden">
+                        <img 
+                          src={thumbnail} 
+                          alt={`Page ${index + 1}`} 
+                          className="w-full h-full object-cover"
+                          onClick={() => handleViewDocument(document.id)}
+                          onError={(e) => {
+                            console.log(`Thumbnail failed to load: ${thumbnail}`);
+                            (e.target as HTMLImageElement).src = `/placeholder.svg`;
+                          }}
+                        />
+                      </div>
+                    ))}
+                    {document.thumbnails.length > 3 && (
+                      <div 
+                        className="shrink-0 w-16 h-20 flex items-center justify-center border rounded-sm bg-muted/50 cursor-pointer"
+                        onClick={() => handleViewDocument(document.id)}
+                      >
+                        <span className="text-xs text-muted-foreground">+{document.thumbnails.length - 3} more</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+                
+                <div className="mt-2">
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="h-7 text-xs px-2 text-primary"
+                    onClick={() => handleViewDocument(document.id)}
+                  >
+                    View details
+                  </Button>
+                </div>
               </div>
             </div>
           ))}

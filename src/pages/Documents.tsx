@@ -27,11 +27,10 @@ export default function Documents() {
   const [isRefreshing, setIsRefreshing] = React.useState(false);
   const [errorShown, setErrorShown] = React.useState(false);
 
+  // Fetch documents on mount
   React.useEffect(() => {
-    fetchUserDocuments().catch(err => {
-      console.error("Error in initial document fetch:", err);
-    });
-  }, [fetchUserDocuments]);
+    handleRefreshDocuments();
+  }, []);
 
   // Show fetch error only once
   React.useEffect(() => {
