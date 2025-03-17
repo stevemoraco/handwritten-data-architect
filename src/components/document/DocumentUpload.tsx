@@ -1,30 +1,18 @@
+
 import * as React from "react";
-import { FileUpload, FileUploadRef, FilePreview } from "@/components/ui/file-upload";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { useUpload } from "@/context/UploadContext";
 import { useAuth } from "@/context/AuthContext";
 import { useDocuments } from "@/context/DocumentContext";
-import { toast } from "@/components/ui/use-toast";
-import { 
-  ArrowRight, 
-  FileText, 
-  Shield, 
-  AlertTriangle, 
-  RefreshCw, 
-  ExternalLink, 
-  Upload, 
-  CheckSquare 
-} from "lucide-react";
+import { toast } from "@/hooks/use-toast";
+import { ArrowRight, FileText, Shield, AlertTriangle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
 import { LoginModal } from "@/components/auth/LoginModal";
-import { Document } from "@/types";
-import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { DocumentSelector } from "./DocumentSelector";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { DocumentUploader } from "./DocumentUploader";
 
 interface DocumentUploadProps {
   onDocumentsUploaded?: (documentIds: string[]) => void;
@@ -37,364 +25,20 @@ export function DocumentUpload({
   pipelineId,
   className,
 }: DocumentUploadProps) {
-  const { isUploading, uploads, addUpload, updateUploadProgress, updateUploadStatus, updatePageProgress } = useUpload();
   const { user } = useAuth();
-  const { documents, isLoading, fetchUserDocuments, convertPdfToImages, processDocumentText } = useDocuments();
+  const { documents, isLoading } = useDocuments();
   const navigate = useNavigate();
-  const [selectedFiles, setSelectedFiles] = React.useState<File[]>([]);
-  const [uploadedDocumentIds, setUploadedDocumentIds] = React.useState<string[]>([]);
   const [selectedExistingDocumentIds, setSelectedExistingDocumentIds] = React.useState<string[]>([]);
+  const [uploadedDocumentIds, setUploadedDocumentIds] = React.useState<string[]>([]);
   const [showLoginModal, setShowLoginModal] = React.useState(false);
-  const [isProcessing, setIsProcessing] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
   const [activeTab, setActiveTab] = React.useState<string>("existing");
-  const fileUploadRef = React.useRef<FileUploadRef>(null);
-
-  React.useEffect(() => {
-    if (user) {
-      fetchUserDocuments();
-    }
-  }, [user]);
-
-  const handleFilesSelected = (files: File[]) => {
-    if (!user) {
-      setSelectedFiles(files);
-      setShowLoginModal(true);
-      return;
-    }
-    
-    setSelectedFiles(files);
-    startUpload(files);
-  };
-  
-  const startUpload = async (files: File[]) => {
-    if (!user) {
-      setShowLoginModal(true);
-      return;
-    }
-    
-    setError(null);
-    
-    try {
-      // First, ensure the document_files bucket exists
-      try {
-        const { data: bucketData, error: bucketError } = await supabase.storage.getBucket('document_files');
-        
-        if (bucketError && bucketError.message.includes('not found')) {
-          console.log("Document files bucket not found, creating it...");
-          const { error: createError } = await supabase.storage.createBucket('document_files', {
-            public: true,
-            fileSizeLimit: 50000000 // 50MB
-          });
-          
-          if (createError) {
-            throw new Error(`Failed to create document_files bucket: ${createError.message}`);
-          }
-          console.log("document_files bucket created successfully");
-        }
-      } catch (bucketError) {
-        console.error("Error checking/creating bucket:", bucketError);
-        // Continue with upload even if bucket check fails
-      }
-
-      const newDocumentIds = await Promise.all(
-        files.map(async (file) => {
-          // Check for duplicates before uploading
-          const { data: existingDocs, error: queryError } = await supabase
-            .from("documents")
-            .select("id, name, size")
-            .eq("user_id", user.id)
-            .eq("name", file.name);
-          
-          if (!queryError && existingDocs && existingDocs.length > 0) {
-            // Check if size matches too for extra verification
-            const potentialDuplicate = existingDocs.find(doc => 
-              doc.size === file.size || Math.abs(doc.size - file.size) < 100 // Allow small difference in size
-            );
-            
-            if (potentialDuplicate) {
-              toast({
-                title: "Duplicate document detected",
-                description: `${file.name} already exists in your documents.`,
-                variant: "default"
-              });
-              
-              return potentialDuplicate.id;
-            }
-          }
-          
-          const uploadId = addUpload(file.name);
-          
-          try {
-            // Create document record first
-            const { data: document, error: documentError } = await supabase
-              .from('documents')
-              .insert({
-                name: file.name,
-                type: file.type.includes('pdf') ? 'pdf' : 'image',
-                status: 'uploading',
-                user_id: user.id,
-                size: file.size
-              })
-              .select()
-              .single();
-            
-            if (documentError) {
-              throw new Error(`Failed to create document record: ${documentError.message}`);
-            }
-            
-            if (!document) {
-              throw new Error('Document record not created');
-            }
-            
-            await supabase.from('processing_logs').insert({
-              document_id: document.id,
-              action: 'Upload Started',
-              status: 'success',
-              message: `Started uploading ${file.name}`
-            });
-            
-            console.log(`Created document record with ID: ${document.id}`);
-            
-            // Get PDF preview for page count and thumbnails
-            let pageCount = 1; // Default for non-PDFs
-            const filePreview = fileUploadRef.current?.getPreviewsForFile(file);
-            
-            if (filePreview) {
-              pageCount = filePreview.pageCount || 1;
-            }
-            
-            const originalFilePath = `${user.id}/${document.id}/original${file.type.includes('pdf') ? '.pdf' : ''}`;
-            const filePath = `${user.id}/${document.id}/${encodeURIComponent(file.name)}`;
-            
-            const uploadOptions = {
-              cacheControl: '3600'
-            };
-            
-            let lastProgress = 0;
-            
-            updateUploadProgress(uploadId, 20);
-            
-            // Upload the file with its original name
-            const { error: uploadError } = await supabase.storage
-              .from('document_files')
-              .upload(filePath, file, uploadOptions);
-            
-            if (uploadError) {
-              console.error("Detailed upload error:", JSON.stringify({
-                message: uploadError.message,
-                name: uploadError.name,
-                ...(typeof uploadError === 'object' && uploadError !== null ? {
-                  details: (uploadError as any).details,
-                  hint: (uploadError as any).hint,
-                  code: (uploadError as any).code
-                } : {})
-              }, null, 2));
-              
-              await supabase
-                .from('documents')
-                .update({
-                  status: 'failed',
-                  processing_error: `Upload failed: ${uploadError.message}${(uploadError as any).hint ? ` (${(uploadError as any).hint})` : ''}`,
-                  updated_at: new Date().toISOString()
-                })
-                .eq('id', document.id);
-              
-              await supabase.from('processing_logs').insert({
-                document_id: document.id,
-                action: 'Upload Failed',
-                status: 'error',
-                message: uploadError.message
-              });
-              
-              updateUploadStatus(uploadId, 'error', uploadError.message);
-              throw new Error(`Failed to upload file: ${uploadError.message}`);
-            }
-            
-            // Create a copy for original if it's a different path
-            if (filePath !== originalFilePath) {
-              const { error: originalUploadError } = await supabase.storage
-                .from('document_files')
-                .copy(filePath, originalFilePath);
-                
-              if (originalUploadError) {
-                console.error("Error creating original file copy:", originalUploadError);
-                // Continue despite error, not critical
-              }
-            }
-            
-            updateUploadProgress(uploadId, 60);
-            
-            const { data: publicURL } = supabase.storage
-              .from('document_files')
-              .getPublicUrl(filePath);
-            
-            // Get the original URL
-            const { data: originalPublicURL } = supabase.storage
-              .from('document_files')
-              .getPublicUrl(originalFilePath);
-              
-            // Update document with URLs and mark as uploaded
-            await supabase
-              .from('documents')
-              .update({
-                status: 'uploaded',
-                original_url: originalPublicURL.publicUrl,
-                updated_at: new Date().toISOString()
-              })
-              .eq('id', document.id);
-            
-            await supabase.from('processing_logs').insert({
-              document_id: document.id,
-              action: 'Upload Completed',
-              status: 'success',
-              message: `Successfully uploaded ${file.name}`
-            });
-            
-            updateUploadStatus(uploadId, 'complete');
-            console.log(`File uploaded successfully: ${file.name}`);
-            
-            // Process previews and upload page images
-            try {
-              updateUploadStatus(uploadId, 'processing');
-              setIsProcessing(true);
-              
-              // Upload page images directly from the client-side previews
-              let thumbnailUrls: string[] = [];
-              if (filePreview && fileUploadRef.current) {
-                updatePageProgress(uploadId, 0, filePreview.pageCount);
-                
-                // Upload the rendered page images to storage
-                thumbnailUrls = await fileUploadRef.current.uploadPageImagesToStorage(document.id, filePreview);
-                
-                // Update progress as we go
-                updatePageProgress(uploadId, thumbnailUrls.length, filePreview.pageCount);
-              }
-              
-              // Clear any existing pages for this document
-              await supabase
-                .from("document_pages")
-                .delete()
-                .eq("document_id", document.id);
-              
-              // Create page records for each page
-              if (filePreview && filePreview.pages.length > 0) {
-                // Batch insert all pages
-                const pageRecords = filePreview.pages.map((page, index) => ({
-                  document_id: document.id,
-                  page_number: page.pageNumber,
-                  image_url: thumbnailUrls[index] || '',
-                  text_content: '' // We'll update text content later if needed
-                }));
-                
-                await supabase.from("document_pages").insert(pageRecords);
-              } else if (file.type.includes('image')) {
-                // For a single image, create one page record
-                await supabase.from("document_pages").insert({
-                  document_id: document.id,
-                  page_number: 1,
-                  image_url: publicURL.publicUrl,
-                  text_content: ""
-                });
-              }
-              
-              // Update final document with page count and status
-              await supabase
-                .from('documents')
-                .update({
-                  page_count: pageCount,
-                  status: 'processed'
-                })
-                .eq('id', document.id);
-              
-              updateUploadStatus(uploadId, 'complete');
-              updatePageProgress(uploadId, pageCount, pageCount);
-              
-              await supabase.from('processing_logs').insert({
-                document_id: document.id,
-                action: 'Processing Completed',
-                status: 'success',
-                message: `Successfully processed ${pageCount} pages from ${file.name}`
-              });
-              
-            } catch (processingError) {
-              console.error('Error processing document:', processingError);
-              
-              await supabase.from('processing_logs').insert({
-                document_id: document.id,
-                action: 'Processing Error',
-                status: 'error',
-                message: processingError.message || 'Unknown processing error'
-              });
-              
-              updateUploadStatus(uploadId, 'error', processingError.message || 'Unknown processing error');
-            } finally {
-              setIsProcessing(false);
-            }
-            
-            return document.id;
-          } catch (error) {
-            console.error(`Error uploading ${file.name}:`, error);
-            updateUploadStatus(uploadId, 'error', error.message || 'Unknown error occurred');
-            throw error;
-          }
-        })
-      ).catch(error => {
-        console.error('Error in upload process:', error);
-        setError(`Upload failed: ${error.message}`);
-        return [];
-      });
-      
-      const successfulUploads = newDocumentIds.filter(id => id);
-      
-      if (successfulUploads.length > 0) {
-        setUploadedDocumentIds(prev => [...prev, ...successfulUploads]);
-        
-        toast({
-          title: "Files uploaded successfully",
-          description: `${successfulUploads.length} document${successfulUploads.length > 1 ? 's' : ''} uploaded.`,
-        });
-        
-        await fetchUserDocuments();
-      }
-    } catch (error) {
-      console.error('Unexpected error in file upload handler:', error);
-      setError(`An unexpected error occurred: ${error.message}`);
-    }
-  };
-
-  const handleRetryProcessing = async (documentId: string) => {
-    try {
-      await convertPdfToImages(documentId);
-    } catch (error) {
-      console.error("Error retrying processing:", error);
-      setError(`Failed to process document: ${error.message}`);
-    }
-  };
-
-  const handleProcessText = async (documentId: string) => {
-    try {
-      await processDocumentText(documentId);
-    } catch (error) {
-      console.error("Error processing document text:", error);
-      setError(`Failed to process document text: ${error.message}`);
-    }
-  };
-
-  const handleViewOriginalDocument = (url: string) => {
-    if (url) {
-      window.open(url, '_blank');
-    } else {
-      toast({
-        title: "Error",
-        description: "Original document URL not available",
-        variant: "destructive",
-      });
-    }
-  };
 
   const handleExistingDocumentSelection = (documentIds: string[]) => {
     setSelectedExistingDocumentIds(documentIds);
+  };
+
+  const handleUploadsComplete = (documentIds: string[]) => {
+    setUploadedDocumentIds(prev => [...prev, ...documentIds]);
   };
 
   const handleContinue = () => {
@@ -406,7 +50,7 @@ export function DocumentUpload({
     if (onDocumentsUploaded && allSelectedDocumentIds.length > 0) {
       onDocumentsUploaded(allSelectedDocumentIds);
     } else if (allSelectedDocumentIds.length > 0) {
-      navigate(`/process`);
+      navigate(`/process`, { state: { documentIds: allSelectedDocumentIds } });
     } else {
       toast({
         title: "No documents selected",
@@ -416,23 +60,14 @@ export function DocumentUpload({
     }
   };
 
-  const handleViewDocument = (documentId: string) => {
-    navigate(`/process?documentId=${documentId}`);
-  };
-
   const handleAuthComplete = () => {
     setShowLoginModal(false);
     toast({
       title: "Account created successfully",
       description: "You can now securely upload and process your documents.",
     });
-    
-    if (selectedFiles.length > 0) {
-      startUpload(selectedFiles);
-    }
   };
 
-  const successfulUploads = uploads.filter(upload => upload.status === "complete").length;
   const totalDocuments = documents.length;
   const totalSelected = uploadedDocumentIds.length + selectedExistingDocumentIds.length;
 
@@ -472,22 +107,12 @@ export function DocumentUpload({
             </Alert>
           )}
 
-          {error && (
-            <Alert className="mb-4 border-red-200 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
-              <AlertTriangle className="h-4 w-4" />
-              <AlertTitle>Upload Error</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
-
           <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-2">
             <TabsList className="grid grid-cols-2 mb-4">
               <TabsTrigger value="existing">
-                <CheckSquare className="h-4 w-4 mr-2" />
                 Select Existing
               </TabsTrigger>
               <TabsTrigger value="upload">
-                <Upload className="h-4 w-4 mr-2" />
                 Upload New
               </TabsTrigger>
             </TabsList>
@@ -501,18 +126,9 @@ export function DocumentUpload({
             </TabsContent>
             
             <TabsContent value="upload">
-              <FileUpload
-                ref={fileUploadRef}
-                onFilesUploaded={handleFilesSelected}
-                accept={{ 'application/pdf': ['.pdf'] }}
-                disabled={isUploading || isProcessing}
+              <DocumentUploader
+                onUploadComplete={handleUploadsComplete}
               />
-              
-              {isProcessing && (
-                <div className="mt-4 text-center py-2 text-sm text-muted-foreground animate-pulse">
-                  Processing documents... This might take a moment.
-                </div>
-              )}
             </TabsContent>
           </Tabs>
           
@@ -543,7 +159,7 @@ export function DocumentUpload({
           
           <Button 
             onClick={handleContinue}
-            disabled={totalSelected === 0 || isUploading || isProcessing}
+            disabled={totalSelected === 0}
           >
             Continue <ArrowRight className="ml-2 h-4 w-4" />
           </Button>

@@ -3,7 +3,7 @@ import * as React from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useDocuments } from "@/context/DocumentContext";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Loader2, AlertTriangle } from "lucide-react";
+import { ArrowLeft, Loader2, AlertTriangle, ArrowUpIcon, FileText } from "lucide-react";
 import { getProcessingLogs } from "@/services/documentService";
 import { ProcessingLog } from "@/types";
 import { toast } from "@/hooks/use-toast";
@@ -86,6 +86,12 @@ export default function Document() {
   const handleBack = () => {
     navigate("/documents");
   };
+  
+  const handleProcess = () => {
+    if (documentId) {
+      navigate(`/process?documentId=${documentId}`);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -144,12 +150,21 @@ export default function Document() {
 
   return (
     <div className="container py-10">
-      <Button variant="outline" onClick={handleBack} className="mb-6">
-        <ArrowLeft className="h-4 w-4 mr-2" /> Back to Documents
-      </Button>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-4">
+        <Button variant="outline" onClick={handleBack}>
+          <ArrowLeft className="h-4 w-4 mr-2" /> Back to Documents
+        </Button>
+        
+        <Button onClick={handleProcess}>
+          <ArrowUpIcon className="h-4 w-4 mr-2" /> Process Document
+        </Button>
+      </div>
       
       <h1 className="text-2xl font-bold mb-6 text-center md:text-left">
-        {document.name}
+        <div className="flex items-center gap-2">
+          <FileText className="h-5 w-5" />
+          {document.name}
+        </div>
       </h1>
       
       {logsError && (
