@@ -1,21 +1,9 @@
 
 import * as React from "react";
 import { useAuth } from "@/context/AuthContext";
-import { Document } from "@/types";
+import { Document, DocumentSchema } from "@/types";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
-
-interface DocumentSchema {
-  id: string;
-  name: string;
-  structure: any[];
-  description: string;
-  rationale: string;
-  suggestions: any[];
-  createdAt: string;
-  updatedAt: string;
-  organizationId: string;
-}
 
 interface DocumentContextType {
   documents: Document[];
@@ -107,7 +95,7 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             createdAt: doc.created_at,
             updatedAt: doc.updated_at,
             userId: doc.user_id,
-            organizationId: doc.organization_id || null,
+            organizationId: null, // Fixed: Use null instead of doc.organization_id which doesn't exist
             pipelineId: doc.pipeline_id,
             processingError: doc.processing_error,
             processing_progress: doc.processing_progress,
