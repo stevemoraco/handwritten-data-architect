@@ -1,4 +1,3 @@
-
 import * as React from "react";
 import { useAuth } from "@/context/AuthContext";
 import { Document, DocumentSchema } from "@/types";
@@ -41,7 +40,6 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [fetchError, setFetchError] = React.useState<Error | null>(null);
   const [errorShown, setErrorShown] = React.useState(false);
 
-  // Fetch documents when user changes
   React.useEffect(() => {
     if (user) {
       fetchUserDocuments();
@@ -50,14 +48,12 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, [user]);
 
-  // Function to fetch user documents
   const fetchUserDocuments = async () => {
     if (!user) return;
     
     setIsLoading(true);
     
     try {
-      // Fetch documents
       const { data, error } = await supabase
         .from("documents")
         .select("*")
@@ -75,10 +71,8 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       
       console.log("Fetched documents:", data.length);
       
-      // Process document data
       const processedDocs: Document[] = await Promise.all(
         data.map(async (doc) => {
-          // Get thumbnails from document pages
           const { data: pages, error: pagesError } = await supabase
             .from("document_pages")
             .select("image_url")
@@ -89,11 +83,9 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           
           const thumbnails = !pagesError && pages ? pages.map(page => page.image_url).filter(Boolean) : [];
           
-          // Try to get the document URL if not set
-          let docUrl = doc.original_url || doc.url || "";
+          let docUrl = doc.original_url || "";
           if (!docUrl && doc.user_id) {
             try {
-              // Try with ID-based path
               const pathWithId = `${doc.user_id}/${doc.id}/original${doc.type === 'pdf' ? '.pdf' : ''}`;
               const { data: urlData } = supabase.storage
                 .from("document_files")
@@ -119,9 +111,9 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             createdAt: doc.created_at,
             updatedAt: doc.updated_at,
             userId: doc.user_id,
-            organizationId: null, // Use null instead of doc.organization_id which doesn't exist
+            organizationId: null,
             pipelineId: doc.pipeline_id,
-            processingError: doc.processing_error,
+            processing_error: doc.processing_error,
             processing_progress: doc.processing_progress,
             transcription: doc.transcription,
           };
@@ -148,12 +140,10 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  // Function to remove multiple documents
   const removeBatchDocuments = async (documentIds: string[]) => {
     if (!user || documentIds.length === 0) return;
     
     try {
-      // Delete document records
       const { error } = await supabase
         .from("documents")
         .delete()
@@ -163,7 +153,6 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         throw new Error(`Failed to delete documents: ${error.message}`);
       }
       
-      // Update state
       setDocuments(prevDocs => prevDocs.filter(doc => !documentIds.includes(doc.id)));
     } catch (error) {
       console.error("Error deleting documents:", error);
@@ -171,22 +160,18 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  // Function to remove a single document
   const removeSingleDocument = async (documentId: string) => {
     await removeBatchDocuments([documentId]);
   };
   
-  // Alias for removeSingleDocument for compatibility
   const removeDocument = async (documentId: string) => {
     await removeSingleDocument(documentId);
   };
 
-  // Function to convert PDF to images
   const convertPdfToImages = async (documentId: string) => {
     if (!user) return;
     
     try {
-      // Update document status to processing
       await supabase
         .from("documents")
         .update({
@@ -195,7 +180,6 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         })
         .eq("id", documentId);
       
-      // Call the edge function to convert PDF to images
       const { data, error } = await supabase.functions.invoke('pdf-to-images', {
         body: { documentId, userId: user.id }
       });
@@ -205,13 +189,12 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         throw new Error(`Failed to convert PDF: ${error.message}`);
       }
       
-      await fetchUserDocuments(); // Refresh documents to get updated state
+      await fetchUserDocuments();
       
       return data;
     } catch (error) {
       console.error("Error in PDF conversion:", error);
       
-      // Update document status to failed
       await supabase
         .from("documents")
         .update({
@@ -224,12 +207,10 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  // Function to process document text
   const processDocumentText = async (documentId: string) => {
     if (!user) return;
     
     try {
-      // Update document status to processing
       await supabase
         .from("documents")
         .update({
@@ -238,7 +219,6 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         })
         .eq("id", documentId);
       
-      // Call the edge function to process document text
       const { data, error } = await supabase.functions.invoke('process-document', {
         body: { documentId }
       });
@@ -248,13 +228,12 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         throw new Error(`Failed to process document text: ${error.message}`);
       }
       
-      await fetchUserDocuments(); // Refresh documents to get updated state
+      await fetchUserDocuments();
       
       return data;
     } catch (error) {
       console.error("Error in document text processing:", error);
       
-      // Update document status to failed
       await supabase
         .from("documents")
         .update({

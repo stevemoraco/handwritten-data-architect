@@ -250,9 +250,9 @@ export function SimpleDocumentList({
                   <span>{document.createdAt ? formatDistanceToNow(new Date(document.createdAt), { addSuffix: true }) : 'Unknown date'}</span>
                 </div>
                 
-                {document.status === 'failed' && document.processingError && (
+                {document.status === 'failed' && document.processing_error && (
                   <div className="mt-1 text-xs text-destructive">
-                    Error: {document.processingError}
+                    Error: {document.processing_error}
                   </div>
                 )}
                 
