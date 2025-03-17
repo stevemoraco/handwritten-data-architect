@@ -1,3 +1,4 @@
+
 import * as React from "react";
 import { Document } from "@/types";
 import { Card, CardContent } from "@/components/ui/card";
@@ -256,7 +257,7 @@ export function SimpleDocumentList({
                   </div>
                 )}
                 
-                {document.thumbnails && document.thumbnails.length > 0 && (
+                {document.thumbnails && document.thumbnails.length > 0 ? (
                   <div className="mt-2 flex gap-2 overflow-x-auto pb-2">
                     {document.thumbnails.slice(0, 3).map((thumbnail, index) => (
                       <div key={index} className="shrink-0 w-16 h-20 border rounded-sm overflow-hidden">
@@ -280,6 +281,21 @@ export function SimpleDocumentList({
                         <span className="text-xs text-muted-foreground">+{document.thumbnails.length - 3} more</span>
                       </div>
                     )}
+                  </div>
+                ) : (
+                  <div className="mt-2 flex gap-2">
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="h-7 text-xs px-2 text-primary"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        navigate(`/document/${document.id}`);
+                      }}
+                    >
+                      Generate thumbnails
+                    </Button>
                   </div>
                 )}
                 

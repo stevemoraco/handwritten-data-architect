@@ -1,3 +1,4 @@
+
 import * as React from "react";
 import { useAuth } from "@/context/AuthContext";
 import { Document, DocumentSchema } from "@/types";
@@ -73,19 +74,24 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       
       const processedDocs: Document[] = await Promise.all(
         data.map(async (doc) => {
+          // First fetch pages to get thumbnails and page count
           const { data: pages, error: pagesError } = await supabase
             .from("document_pages")
             .select("image_url")
             .eq("document_id", doc.id)
             .order("page_number", { ascending: true });
           
-          console.log(`Document ${doc.id} page fetch:`, !pagesError ? "success" : "error", pages?.length || 0);
+          console.log(`Document ${doc.id} ${doc.name} page fetch:`, !pagesError ? "success" : "error", pages?.length || 0);
           
+          // Get thumbnails from pages
           const thumbnails = !pagesError && pages ? pages.map(page => page.image_url).filter(Boolean) : [];
           
+          // Determine document URL, trying multiple sources
           let docUrl = doc.original_url || "";
+          
           if (!docUrl && doc.user_id) {
             try {
+              // Try to get URL from storage using ID-based path
               const pathWithId = `${doc.user_id}/${doc.id}/original${doc.type === 'pdf' ? '.pdf' : ''}`;
               const { data: urlData } = supabase.storage
                 .from("document_files")
@@ -93,9 +99,28 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               
               if (urlData?.publicUrl) {
                 docUrl = urlData.publicUrl;
+                
+                // Update the document with the found URL
+                await supabase
+                  .from("documents")
+                  .update({ original_url: docUrl })
+                  .eq("id", doc.id);
               }
             } catch (e) {
               console.error("Error getting document URL:", e);
+            }
+          }
+
+          // Update the page count if we have thumbnails but no page_count in the document
+          const pageCount = doc.page_count || thumbnails.length || 0;
+          if (thumbnails.length > 0 && (!doc.page_count || doc.page_count === 0)) {
+            try {
+              await supabase
+                .from("documents")
+                .update({ page_count: thumbnails.length })
+                .eq("id", doc.id);
+            } catch (updateError) {
+              console.error("Error updating page count:", updateError);
             }
           }
           
@@ -107,7 +132,7 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             url: docUrl,
             original_url: doc.original_url || "",
             thumbnails,
-            pageCount: doc.page_count || 0,
+            pageCount: pageCount,
             createdAt: doc.created_at,
             updatedAt: doc.updated_at,
             userId: doc.user_id,
@@ -126,7 +151,7 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       
       console.log("Processed documents:", processedDocs.length);
       processedDocs.forEach(doc => {
-        console.log(`Document ${doc.id} "${doc.name}": ${doc.thumbnails.length} thumbnails`);
+        console.log(`Document ${doc.id} "${doc.name}": ${doc.thumbnails.length} thumbnails, ${doc.pageCount} pages`);
       });
     } catch (error) {
       console.error("Error fetching documents:", error);
@@ -172,6 +197,7 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (!user) return;
     
     try {
+      // Update the document status to processing
       await supabase
         .from("documents")
         .update({
@@ -180,6 +206,7 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         })
         .eq("id", documentId);
       
+      // Call the pdf-to-images edge function
       const { data, error } = await supabase.functions.invoke('pdf-to-images', {
         body: { documentId, userId: user.id }
       });
@@ -189,12 +216,14 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         throw new Error(`Failed to convert PDF: ${error.message}`);
       }
       
+      // Refresh the documents list to get the updated thumbnails
       await fetchUserDocuments();
       
       return data;
     } catch (error) {
       console.error("Error in PDF conversion:", error);
       
+      // Update the document status to failed
       await supabase
         .from("documents")
         .update({

@@ -229,7 +229,7 @@ async function processPdf(supabase, userId, documentId) {
     pageCount = pdf.numPages;
     console.log(`PDF loaded with ${pageCount} pages`);
 
-    // Update progress
+    // Update progress and page count in the database
     await supabase
       .from("documents")
       .update({ 
@@ -241,6 +241,29 @@ async function processPdf(supabase, userId, documentId) {
     // Generate thumbnails for each page
     console.log("Generating thumbnails...");
     const pageFolderPath = `${actualUserId}/${documentId}/pages`;
+    
+    // Check if document_files bucket exists, create if not
+    try {
+      const { data: buckets } = await supabase.storage.listBuckets();
+      const bucketExists = buckets.some(bucket => bucket.name === "document_files");
+      
+      if (!bucketExists) {
+        console.log("Creating document_files bucket...");
+        try {
+          const { error: createBucketError } = await supabase.storage.createBucket("document_files", {
+            public: true
+          });
+          
+          if (createBucketError) {
+            console.log(`Error creating bucket: ${JSON.stringify(createBucketError)}`);
+          }
+        } catch (error) {
+          console.log(`Error creating bucket: ${JSON.stringify(error)}`);
+        }
+      }
+    } catch (error) {
+      console.log(`Error checking buckets: ${JSON.stringify(error)}`);
+    }
     
     // Ensure the pages folder exists
     try {
@@ -266,6 +289,8 @@ async function processPdf(supabase, userId, documentId) {
           .from("documents")
           .update({ processing_progress: progress })
           .eq("id", documentId);
+        
+        console.log(`Processing page ${i} of ${pageCount}...`);
         
         const page = await pdf.getPage(i);
         const viewport = page.getViewport({ scale: 0.2 });
