@@ -1,3 +1,4 @@
+
 export interface User {
   id: string;
   email: string;
@@ -38,7 +39,7 @@ export interface Document {
   created_at?: string;
   updatedAt: string;
   userId: string;
-  organizationId?: string;
+  organizationId?: string | null;
   pipelineId?: string;
 }
 
@@ -156,4 +157,34 @@ export interface DocumentPrompt {
   prompt_type: string;
   prompt_text: string;
   created_at: string;
+}
+
+export interface ProcessingStepsProps {
+  steps: AIProcessingStep[];
+  onStartProcessing?: () => void;
+  onViewResults?: () => void;
+  isProcessingComplete: boolean;
+  className?: string;
+  documentCount?: number;
+  processedDocuments?: number;
+  schemaDetails?: {
+    tables: number;
+    fields: number;
+  };
+  documentDetails?: Array<{
+    id: string;
+    name: string;
+    pageCount: number;
+    processedPages: number;
+    status: "waiting" | "processing" | "completed" | "failed";
+    pages: Array<{
+      pageNumber: number;
+      status: "waiting" | "processing" | "completed" | "failed";
+      thumbnail?: string;
+      text?: string;
+      error?: string;
+    }>;
+    thumbnail?: string;
+    error?: string;
+  }>;
 }

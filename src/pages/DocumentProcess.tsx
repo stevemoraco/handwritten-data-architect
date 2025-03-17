@@ -10,6 +10,7 @@ import { useDocuments } from "@/context/DocumentContext";
 import { ArrowLeft } from "lucide-react";
 import { ProcessingSteps } from "@/components/document/ProcessingSteps";
 import { toast } from "@/hooks/use-toast";
+import { AIProcessingStep } from "@/types";
 
 export default function DocumentProcess() {
   const { documents, isLoading, fetchUserDocuments } = useDocuments();
@@ -21,6 +22,37 @@ export default function DocumentProcess() {
   const [selectedDocumentIds, setSelectedDocumentIds] = React.useState<string[]>([]);
   const [activeTab, setActiveTab] = React.useState<string>("select");
   const [step, setStep] = React.useState<number>(0);
+  const [processingSteps, setProcessingSteps] = React.useState<AIProcessingStep[]>([
+    {
+      id: "upload",
+      name: "Document Upload",
+      description: "Uploading and validating documents",
+      status: "waiting",
+      timestamp: new Date().toISOString()
+    },
+    {
+      id: "transcription",
+      name: "Document Transcription",
+      description: "Converting document content to text",
+      status: "waiting",
+      timestamp: new Date().toISOString()
+    },
+    {
+      id: "schema",
+      name: "Schema Generation",
+      description: "Analyzing document structure",
+      status: "waiting",
+      timestamp: new Date().toISOString()
+    },
+    {
+      id: "refine",
+      name: "Schema Refinement",
+      description: "Optimizing schema for accuracy",
+      status: "waiting",
+      timestamp: new Date().toISOString()
+    }
+  ]);
+  const [isProcessingComplete, setIsProcessingComplete] = React.useState(false);
   
   // Check for documents passed through state
   React.useEffect(() => {
@@ -74,6 +106,27 @@ export default function DocumentProcess() {
     } else {
       navigate("/documents");
     }
+  };
+
+  // Handle starting processing
+  const handleStartProcessing = () => {
+    // Simulate processing start
+    const updatedSteps = processingSteps.map((step, index) => {
+      if (index === 0) {
+        return { ...step, status: "in_progress" as const };
+      }
+      return step;
+    });
+    setProcessingSteps(updatedSteps);
+    
+    // Simulate processing completion after a delay
+    setTimeout(() => {
+      const completedSteps = processingSteps.map((step) => {
+        return { ...step, status: "completed" as const };
+      });
+      setProcessingSteps(completedSteps);
+      setIsProcessingComplete(true);
+    }, 3000);
   };
   
   return (
@@ -136,14 +189,12 @@ export default function DocumentProcess() {
         </div>
       ) : (
         <ProcessingSteps 
-          documentIds={selectedDocumentIds}
-          onComplete={(data) => {
-            navigate("/documents");
-            toast({
-              title: "Processing complete",
-              description: "Documents have been successfully processed."
-            });
-          }}
+          steps={processingSteps}
+          onStartProcessing={handleStartProcessing}
+          onViewResults={() => navigate("/documents")}
+          isProcessingComplete={isProcessingComplete}
+          documentCount={selectedDocumentIds.length}
+          processedDocuments={isProcessingComplete ? selectedDocumentIds.length : 0}
         />
       )}
     </div>

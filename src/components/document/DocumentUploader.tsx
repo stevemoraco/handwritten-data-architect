@@ -1,4 +1,3 @@
-
 import * as React from "react";
 import { useDropzone } from "react-dropzone";
 import { Button } from "@/components/ui/button";
@@ -77,10 +76,7 @@ export function DocumentUploader({
           }
           
           // Set bucket policy to public
-          const { error: policyError } = await supabase.storage.from('document_files').getPublicUrl('test');
-          if (policyError) {
-            console.error("Error with bucket policy:", policyError);
-          }
+          const publicUrlData = supabase.storage.from('document_files').getPublicUrl('test');
           
           console.log("Storage bucket created successfully");
         }
@@ -646,3 +642,4 @@ export function DocumentUploader({
     </Card>
   );
 }
+
