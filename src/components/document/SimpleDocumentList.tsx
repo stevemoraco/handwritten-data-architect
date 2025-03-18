@@ -3,7 +3,7 @@ import * as React from "react";
 import { Document } from "@/types";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Check, FileIcon, UploadIcon, ExternalLink, AlertTriangle, Clock, RefreshCw } from "lucide-react";
+import { Check, FileIcon, UploadIcon, ExternalLink, AlertTriangle, Clock, RefreshCw, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -11,6 +11,7 @@ import { formatDistanceToNow } from "date-fns";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useNavigate } from "react-router-dom";
 import { useDocuments } from "@/context/DocumentContext";
+import { toast } from "@/hooks/use-toast";
 
 interface SimpleDocumentListProps {
   documents: Document[];
@@ -26,8 +27,9 @@ export function SimpleDocumentList({
   onSelectionChange
 }: SimpleDocumentListProps) {
   const navigate = useNavigate();
-  const { fetchError, fetchUserDocuments } = useDocuments();
+  const { fetchError, fetchUserDocuments, convertPdfToImages } = useDocuments();
   const [isRetrying, setIsRetrying] = React.useState(false);
+  const [processingIds, setProcessingIds] = React.useState<string[]>([]);
   
   const handleToggleDocument = (documentId: string, checked: boolean) => {
     if (checked) {
@@ -57,8 +59,44 @@ export function SimpleDocumentList({
   const handleViewDocument = (documentId: string) => {
     navigate(`/document/${documentId}`);
   };
+  
+  const handleGenerateThumbnails = async (documentId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    
+    if (processingIds.includes(documentId)) return;
+    
+    setProcessingIds(prev => [...prev, documentId]);
+    
+    try {
+      await convertPdfToImages(documentId);
+      toast({
+        title: "Processing started",
+        description: "Document thumbnails are being generated. This may take a moment.",
+      });
+      
+      // Refresh data after a short delay
+      setTimeout(() => {
+        fetchUserDocuments();
+      }, 2000);
+    } catch (error) {
+      console.error("Error generating thumbnails:", error);
+      toast({
+        title: "Error",
+        description: "Failed to generate thumbnails. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
+      setProcessingIds(prev => prev.filter(id => id !== documentId));
+    }
+  };
 
   const allSelected = documents.length > 0 && selectedIds.length === documents.length;
+  
+  // Helper function to check if thumbnails exist
+  const hasThumbnails = (doc: Document) => {
+    return Array.isArray(doc.thumbnails) && doc.thumbnails.length > 0 && doc.thumbnails[0] !== null;
+  };
   
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -226,7 +264,7 @@ export function SimpleDocumentList({
                       {document.status}
                     </Badge>
                     
-                    {document.url && (
+                    {document.original_url && (
                       <Button
                         variant="ghost"
                         size="sm"
@@ -234,7 +272,7 @@ export function SimpleDocumentList({
                         title="View original document"
                         onClick={(e) => {
                           e.stopPropagation();
-                          window.open(document.url, '_blank');
+                          window.open(document.original_url, '_blank');
                         }}
                       >
                         <ExternalLink className="h-3.5 w-3.5" />
@@ -257,7 +295,7 @@ export function SimpleDocumentList({
                   </div>
                 )}
                 
-                {document.thumbnails && document.thumbnails.length > 0 ? (
+                {hasThumbnails(document) ? (
                   <div className="mt-2 flex gap-2 overflow-x-auto pb-2">
                     {document.thumbnails.slice(0, 3).map((thumbnail, index) => (
                       <div key={index} className="shrink-0 w-16 h-20 border rounded-sm overflow-hidden">
@@ -288,13 +326,17 @@ export function SimpleDocumentList({
                       variant="outline" 
                       size="sm" 
                       className="h-7 text-xs px-2 text-primary"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                        navigate(`/document/${document.id}`);
-                      }}
+                      onClick={(e) => handleGenerateThumbnails(document.id, e)}
+                      disabled={processingIds.includes(document.id) || document.status === "processing"}
                     >
-                      Generate thumbnails
+                      {processingIds.includes(document.id) || document.status === "processing" ? (
+                        <>
+                          <Loader2 className="h-3 w-3 mr-2 animate-spin" />
+                          Processing...
+                        </>
+                      ) : (
+                        <>Generate thumbnails</>
+                      )}
                     </Button>
                   </div>
                 )}

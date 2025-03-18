@@ -13,11 +13,12 @@ import { Card } from "@/components/ui/card";
 export default function Document() {
   const { documentId } = useParams<{ documentId: string }>();
   const navigate = useNavigate();
-  const { documents, fetchUserDocuments, isLoading, fetchError } = useDocuments();
+  const { documents, fetchUserDocuments, isLoading, fetchError, convertPdfToImages } = useDocuments();
   const [logs, setLogs] = React.useState<ProcessingLog[]>([]);
   const [logsLoading, setLogsLoading] = React.useState(true);
   const [logsError, setLogsError] = React.useState<string | null>(null);
   const [errorShown, setErrorShown] = React.useState(false);
+  const [processingDocument, setProcessingDocument] = React.useState(false);
 
   const document = React.useMemo(() => {
     return documents.find(doc => doc.id === documentId);
@@ -47,7 +48,17 @@ export default function Document() {
     };
     
     loadDocumentData();
-  }, [documentId, fetchUserDocuments, documents.length, errorShown]);
+    
+    // Refresh document data every 5 seconds if we're processing
+    const refreshInterval = setInterval(() => {
+      if (document?.status === "processing") {
+        fetchUserDocuments();
+        if (documentId) fetchLogs(documentId);
+      }
+    }, 5000);
+    
+    return () => clearInterval(refreshInterval);
+  }, [documentId, fetchUserDocuments, documents.length, errorShown, document?.status]);
 
   // Show fetch error only once
   React.useEffect(() => {
@@ -90,6 +101,34 @@ export default function Document() {
   const handleProcess = () => {
     if (documentId) {
       navigate(`/process?documentId=${documentId}`);
+    }
+  };
+  
+  const handleGenerateThumbnails = async () => {
+    if (!documentId) return;
+    
+    setProcessingDocument(true);
+    try {
+      await convertPdfToImages(documentId);
+      toast({
+        title: "Processing started",
+        description: "Document thumbnails are being generated. This may take a moment.",
+      });
+      
+      // Refresh data after a short delay
+      setTimeout(() => {
+        fetchUserDocuments();
+        fetchLogs(documentId);
+      }, 2000);
+    } catch (error) {
+      console.error("Error generating thumbnails:", error);
+      toast({
+        title: "Error",
+        description: "Failed to generate thumbnails. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
+      setProcessingDocument(false);
     }
   };
 
@@ -155,9 +194,28 @@ export default function Document() {
           <ArrowLeft className="h-4 w-4 mr-2" /> Back to Documents
         </Button>
         
-        <Button onClick={handleProcess}>
-          <ArrowUpIcon className="h-4 w-4 mr-2" /> Process Document
-        </Button>
+        <div className="flex items-center gap-2">
+          {(!document.thumbnails || document.thumbnails.length === 0) && (
+            <Button 
+              onClick={handleGenerateThumbnails} 
+              disabled={processingDocument || document.status === "processing"}
+              variant="outline"
+            >
+              {processingDocument || document.status === "processing" ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Processing...
+                </>
+              ) : (
+                <>Generate Thumbnails</>
+              )}
+            </Button>
+          )}
+          
+          <Button onClick={handleProcess}>
+            <ArrowUpIcon className="h-4 w-4 mr-2" /> Process Document
+          </Button>
+        </div>
       </div>
       
       <h1 className="text-2xl font-bold mb-6 text-center md:text-left">
@@ -186,7 +244,11 @@ export default function Document() {
         </Card>
       )}
       
-      <DocumentDetail document={document} logs={logs} />
+      <DocumentDetail 
+        document={document} 
+        logs={logs} 
+        onProcess={handleGenerateThumbnails} 
+      />
     </div>
   );
 }

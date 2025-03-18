@@ -77,7 +77,7 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           // First fetch pages to get thumbnails and page count
           const { data: pages, error: pagesError } = await supabase
             .from("document_pages")
-            .select("image_url")
+            .select("image_url, page_number")
             .eq("document_id", doc.id)
             .order("page_number", { ascending: true });
           
@@ -105,6 +105,22 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                   .from("documents")
                   .update({ original_url: docUrl })
                   .eq("id", doc.id);
+              } else {
+                // Try name-based path as fallback
+                const nameBasedPath = `${doc.user_id}/uploads/${encodeURIComponent(doc.name)}`;
+                const { data: nameUrlData } = supabase.storage
+                  .from("document_files")
+                  .getPublicUrl(nameBasedPath);
+                  
+                if (nameUrlData?.publicUrl) {
+                  docUrl = nameUrlData.publicUrl;
+                  
+                  // Update the document with the found URL
+                  await supabase
+                    .from("documents")
+                    .update({ original_url: docUrl })
+                    .eq("id", doc.id);
+                }
               }
             } catch (e) {
               console.error("Error getting document URL:", e);
@@ -141,6 +157,7 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             processing_error: doc.processing_error,
             processing_progress: doc.processing_progress,
             transcription: doc.transcription,
+            created_at: doc.created_at
           };
         })
       );
@@ -206,10 +223,14 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         })
         .eq("id", documentId);
       
+      console.log(`Calling pdf-to-images edge function for document ${documentId}...`);
+      
       // Call the pdf-to-images edge function
       const { data, error } = await supabase.functions.invoke('pdf-to-images', {
         body: { documentId, userId: user.id }
       });
+      
+      console.log(`pdf-to-images response:`, data);
       
       if (error) {
         console.error("Error converting PDF:", error);

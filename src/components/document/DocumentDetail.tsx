@@ -29,33 +29,46 @@ export function DocumentDetail({ document, onProcess, logs = [] }: DocumentDetai
 
   const fetchDocumentUrl = async () => {
     try {
+      setIsCheckingFile(true);
+      
       // First try using original_url if available
       if (document.original_url) {
+        console.log("Using original_url:", document.original_url);
         setFileUrl(document.original_url);
+        setIsCheckingFile(false);
         return;
       }
       
       // If not available, try direct storage path
       if (document.userId) {
+        // Try with ID-based path first
         const pathWithId = `${document.userId}/${document.id}/original${document.type === 'pdf' ? '.pdf' : ''}`;
+        console.log("Trying ID-based path:", pathWithId);
+        
         const { data: urlWithId } = supabase.storage
           .from("document_files")
           .getPublicUrl(pathWithId);
           
         if (urlWithId?.publicUrl) {
+          console.log("Found URL with ID-based path:", urlWithId.publicUrl);
           setFileUrl(urlWithId.publicUrl);
+          setIsCheckingFile(false);
           return;
         }
         
         // Try with uploads path as fallback
         const filename = encodeURIComponent(document.name);
         const pathWithName = `${document.userId}/uploads/${filename}`;
+        console.log("Trying name-based path:", pathWithName);
+        
         const { data: urlWithName } = supabase.storage
           .from("document_files")
           .getPublicUrl(pathWithName);
           
         if (urlWithName?.publicUrl) {
+          console.log("Found URL with name-based path:", urlWithName.publicUrl);
           setFileUrl(urlWithName.publicUrl);
+          setIsCheckingFile(false);
           return;
         }
       }
@@ -63,6 +76,8 @@ export function DocumentDetail({ document, onProcess, logs = [] }: DocumentDetai
       console.error("Could not find a valid URL for document:", document.id);
     } catch (error) {
       console.error("Error fetching document URL:", error);
+    } finally {
+      setIsCheckingFile(false);
     }
   };
 
@@ -70,17 +85,30 @@ export function DocumentDetail({ document, onProcess, logs = [] }: DocumentDetai
     try {
       setIsCheckingFile(true);
       
+      // If fileUrl is already set, try to use it first
       if (fileUrl) {
+        console.log("Opening existing URL:", fileUrl);
         window.open(fileUrl, "_blank");
+        setIsCheckingFile(false);
         return;
       }
       
+      // If not, try to fetch it again
       await fetchDocumentUrl();
       
       if (fileUrl) {
+        console.log("Opening newly fetched URL:", fileUrl);
         window.open(fileUrl, "_blank");
       } else {
-        throw new Error("Could not retrieve a valid document URL");
+        // Try one more approach - direct URL construction
+        if (document.userId) {
+          const directUrl = `https://fhlczpkjthsmhcbphryd.supabase.co/storage/v1/object/public/document_files/${document.userId}/uploads/${encodeURIComponent(document.name)}`;
+          console.log("Trying direct URL construction:", directUrl);
+          
+          window.open(directUrl, "_blank");
+        } else {
+          throw new Error("Could not retrieve a valid document URL");
+        }
       }
     } catch (error) {
       console.error("Error opening document:", error);
@@ -92,6 +120,11 @@ export function DocumentDetail({ document, onProcess, logs = [] }: DocumentDetai
     } finally {
       setIsCheckingFile(false);
     }
+  };
+
+  // Helper function to safely check if thumbnails array exists and has items
+  const hasThumbnails = () => {
+    return Array.isArray(document.thumbnails) && document.thumbnails.length > 0 && document.thumbnails[0] !== null;
   };
 
   return (
@@ -131,9 +164,10 @@ export function DocumentDetail({ document, onProcess, logs = [] }: DocumentDetai
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <p>
-            <Badge>Uploaded</Badge> {new Date(document.createdAt || document.created_at!).toLocaleDateString()}
-          </p>
+          <div className="flex items-center gap-2">
+            <Badge variant="outline">Uploaded</Badge>
+            <span>{new Date(document.createdAt || document.created_at!).toLocaleDateString()}</span>
+          </div>
           
           {document.processing_error && (
             <div className="mt-4 p-3 border border-destructive rounded-md bg-destructive/10">
@@ -185,7 +219,7 @@ export function DocumentDetail({ document, onProcess, logs = [] }: DocumentDetai
               <CardTitle>Preview</CardTitle>
             </CardHeader>
             <CardContent>
-              {document.thumbnails && document.thumbnails.length > 0 ? (
+              {hasThumbnails() ? (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   {document.thumbnails.map((thumbnail, index) => (
                     <div key={index} className="border rounded-lg overflow-hidden">
